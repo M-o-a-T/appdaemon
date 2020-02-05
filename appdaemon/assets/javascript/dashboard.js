@@ -1,3 +1,18 @@
+function getCookie(cname) {
+    var name = cname + "=";
+    var decodedCookie = decodeURIComponent(document.cookie);
+    var ca = decodedCookie.split(';');
+    for(var i = 0; i <ca.length; i++) {
+        var c = ca[i];
+        while (c.charAt(0) === ' ') {
+            c = c.substring(1);
+        }
+        if (c.indexOf(name) === 0) {
+            return c.substring(name.length, c.length);
+        }
+    }
+    return "";
+}
 
 function ha_status(stream, dash, widgets, transport)
 {
@@ -8,12 +23,55 @@ function ha_status(stream, dash, widgets, transport)
 
         webSocket.onopen = function (event)
         {
-            webSocket.send(dash);
+            var request = {
+                request_type: 'hello',
+                data: {
+                    client_name: dash
+                }
+            };
+
+            if (getCookie('adcreds') !== '') {
+                var creds = getCookie('adcreds');
+                creds = creds.substring(1, (creds.length - 1));
+                request['data']['cookie'] = creds
+            }
+
+            webSocket.send(JSON.stringify(request));
         };
 
         webSocket.onmessage = function (event)
         {
             var data = JSON.parse(event.data);
+
+            // Stream Authorized
+            if (data.response_type === "hello" && data.response_success === true)
+            {
+                webSocket.send(JSON.stringify({
+                    request_type: 'listen_state',
+                    data: {
+                        namespace: '*',
+                        entity_id: '*'
+                    }
+                }));
+
+                webSocket.send(JSON.stringify({
+                    request_type: 'listen_event',
+                    data: {
+                        namespace: '*',
+                        event: '*'
+                    }
+                }));
+
+                return
+            }
+
+            // Stream Error
+            if (data.response_type === "error")
+            {
+                console.log('Stream Error', data.msg);
+                webSocket.refresh();
+                return
+            }
 
             update_dash(data)
         };
@@ -105,14 +163,14 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
 {
     child = this;
     child.url = url;
-    
+
     // Function definitions
-    
+
     this.set_field = function(self, field, value)
     {
         self.ViewModel[field](value)
     };
-    
+
     this.format_number = function(self, value)
     {
         var precision = 0;
@@ -145,7 +203,7 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
         return value
     };
 
-    
+
     this.map_state = function(self, value)
     {
         if ("state_map" in self.parameters)
@@ -195,10 +253,18 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
     {
         self.ViewModel[field](self.convert_icon(self, value))
     };
-    
+
     this.get_state = function(child, base_url, entity)
     {
-        state_url = base_url + "/api/appdaemon/state/" + parameters.namespace + "/" + entity.entity;
+        if ("resident_namespace" in parameters)
+        {
+            ns = parameters.resident_namespace
+        }
+        else
+        {
+            ns = parameters.namespace;
+        }
+        state_url = base_url + "/api/appdaemon/state/" + ns + "/" + entity.entity;
         $.ajax
         ({
             url: state_url,
@@ -228,13 +294,13 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
                                 child.icons.icon_on = icon;
                                 child.icons.icon_off = icon
                             }
-                            if ("title_is_friendly_name" in child.parameters 
+                            if ("title_is_friendly_name" in child.parameters
                             && child.parameters.title_is_friendly_name === 1
                             && "friendly_name" in new_state.attributes)
                             {
                                 child.ViewModel.title(new_state.attributes.friendly_name)
                             }
-                            if ("title2_is_friendly_name" in child.parameters 
+                            if ("title2_is_friendly_name" in child.parameters
                             && child.parameters.title2_is_friendly_name === 1
                             && "friendly_name" in new_state.attributes)
                             {
@@ -252,10 +318,10 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
                     {
                         alert("Error getting state, check Java Console for details")
                     }
-                  
+
         });
     };
-   
+
     this.on_ha_data = function(data)
     {
         entity = data.data.entity_id;
@@ -273,15 +339,18 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
             }
         }
     };
-    
+
     this.call_service = function(child, args)
     {
-        ns = parameters.namespace;
-        args["namespace"] = parameters.namespace;
-        if ("service_namespace" in args)
+        if ("resident_namespace" in parameters)
         {
-            ns = args.service_namespace
+            ns = parameters.resident_namespace
         }
+        else
+        {
+            ns = parameters.namespace;
+        }
+        args["namespace"] = parameters.namespace;
 
         service_url = child.url + "/api/appdaemon/service/" + ns + "/" + args["service"];
         $.ajax({
@@ -296,9 +365,9 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
     // Initialization
 
     // Create and initialize bindings
-    
+
     child.ViewModel = {};
-    
+
     Object.keys(parameters.fields).forEach(function(key,index)
     {
         child.ViewModel[key] = ko.observable()
@@ -312,14 +381,14 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
             child.ViewModel[key] = ko.observable()
         });
     }
-    
+
     if ("static_css" in parameters)
     {
         Object.keys(parameters.static_css).forEach(function (key, index) {
             child.ViewModel[key] = ko.observable()
         });
     }
-    
+
     child.icons = {};
     if ("icons" in parameters)
     {
@@ -328,16 +397,16 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
             child.ViewModel[key] = ko.observable()
         });
     }
-    
+
     if ("static_icons" in parameters)
     {
         Object.keys(parameters.static_icons).forEach(function (key, index) {
             child.ViewModel[key] = ko.observable()
         });
     }
-    
+
     ko.applyBindings(child.ViewModel, document.getElementById(widget_id));
-    
+
     // Set any static values
 
     if ("fields" in parameters)
@@ -396,4 +465,3 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
         this.get_state(child, url, monitored_entities[i])
     }
 };
-

@@ -7,24 +7,26 @@ import time
 import cProfile
 import io
 import pstats
-import json
+import shelve
 import threading
 import datetime
 import dateutil.parser
 import copy
-
+import json
+from functools import wraps
+from appdaemon.version import __version__  # noqa: F401
 
 if platform.system() != "Windows":
     import pwd
 
-__version__ = "4.0.0b2"
 secrets = None
+
 
 class Formatter(object):
     def __init__(self):
         self.types = {}
-        self.htchar = '\t'
-        self.lfchar = '\n'
+        self.htchar = "\t"
+        self.lfchar = "\n"
         self.indent = 0
         self.set_formater(object, self.__class__.format_object)
         self.set_formater(dict, self.__class__.format_dict)
@@ -40,84 +42,99 @@ class Formatter(object):
         formater = self.types[type(value) if type(value) in self.types else object]
         return formater(self, value, self.indent)
 
-    def format_object(self, value, indent):
+    @staticmethod
+    def format_object(value, indent):
         return repr(value)
 
     def format_dict(self, value, indent):
         items = [
-            self.lfchar + self.htchar * (indent + 1) + repr(key) + ': ' +
-            (self.types[type(value[key]) if type(value[key]) in self.types else object])(self, value[key], indent + 1)
+            self.lfchar
+            + self.htchar * (indent + 1)
+            + repr(key)
+            + ": "
+            + (self.types[type(value[key]) if type(value[key]) in self.types else object])(self, value[key], indent + 1)
             for key in value
         ]
-        return '{%s}' % (','.join(items) + self.lfchar + self.htchar * indent)
+        return "{%s}" % (",".join(items) + self.lfchar + self.htchar * indent)
 
     def format_list(self, value, indent):
         items = [
-            self.lfchar + self.htchar * (indent + 1) + (self.types[type(item) if type(item) in self.types else object])(
-                self, item, indent + 1)
+            self.lfchar
+            + self.htchar * (indent + 1)
+            + (self.types[type(item) if type(item) in self.types else object])(self, item, indent + 1)
             for item in value
         ]
-        return '[%s]' % (','.join(items) + self.lfchar + self.htchar * indent)
+        return "[%s]" % (",".join(items) + self.lfchar + self.htchar * indent)
 
     def format_tuple(self, value, indent):
         items = [
-            self.lfchar + self.htchar * (indent + 1) + (self.types[type(item) if type(item) in self.types else object])(
-                self, item, indent + 1)
+            self.lfchar
+            + self.htchar * (indent + 1)
+            + (self.types[type(item) if type(item) in self.types else object])(self, item, indent + 1)
             for item in value
         ]
-        return '(%s)' % (','.join(items) + self.lfchar + self.htchar * indent)
+        return "(%s)" % (",".join(items) + self.lfchar + self.htchar * indent)
 
 
-class PersistentDict(dict):
-
+class PersistentDict(shelve.DbfilenameShelf):
     """
-    Persistent Dictionary subclass that uses JSON to persist its contents
+    Dict-like object that uses a Shelf to persist its contents.
     """
-
-    #TODO - this all runs in the loop at the moment ...
 
     def __init__(self, filename, safe, *args, **kwargs):
-        super().__init__(**kwargs)
-        self.filename = filename
+        # writeback=True allows for mutating objects in place, like with a dict.
+        super().__init__(filename, writeback=True)
         self.safe = safe
-        self.lock = threading.RLock()
-        self._load()
+        self.rlock = threading.RLock()
+        self.update(*args, **kwargs)
 
-    def _load(self):
-        with self.lock:
-            if os.path.isfile(self.filename) and os.path.getsize(self.filename) > 0:
-                with open(self.filename, 'r') as fh:
-                    self.update(False, json.load(fh))
+    def __contains__(self, key):
+        with self.rlock:
+            return super().__contains__(key)
 
-    def save(self):
-        with self.lock:
-            with open(self.filename, 'w') as fh:
-                json.dump(self, fh)
-
-    def __getitem__(self, key):
-        return dict.__getitem__(self, key)
-
-    def __setitem__(self, key, val):
-        dict.__setitem__(self, key, val)
-        if self.safe is True:
-            self.save()
-
-    def __repr__(self):
-        dictrepr = dict.__repr__(self)
-        return '%s(%s)' % (type(self).__name__, dictrepr)
+    def __copy__(self):
+        return dict(self)
 
     def __deepcopy__(self, memo):
-        result = {}
-        for key in self.keys():
-            result[key] = self.__getitem__(key)
+        return copy.deepcopy(dict(self), memo=memo)
 
-        return copy.deepcopy(result)
+    def __delitem__(self, key):
+        with self.rlock:
+            super().__delitem__(key)
+
+    def __getitem__(self, key):
+        with self.rlock:
+            return super().__getitem__(key)
+
+    def __iter__(self):
+        with self.rlock:
+            for item in super().__iter__():
+                yield item
+
+    def __len__(self):
+        with self.rlock:
+            return super().__len__()
+
+    def __repr__(self):
+        return "%s(%r)" % (type(self).__name__, dict(self))
+
+    def __setitem__(self, key, val):
+        with self.rlock:
+            super().__setitem__(key, val)
+            if self.safe:
+                self.sync()
+
+    def sync(self):
+        with self.rlock:
+            super().sync()
 
     def update(self, save=True, *args, **kwargs):
-        for k, v in dict(*args, **kwargs).items():
-            self[k] = v
-            if self.safe is True and save is True:
-                self.save()
+        with self.rlock:
+            for key, value in dict(*args, **kwargs).items():
+                # use super().__setitem__() to prevent multiple save() calls
+                super().__setitem__(key, value)
+                if self.safe and save:
+                    self.sync()
 
 
 class AttrDict(dict):
@@ -135,8 +152,7 @@ class AttrDict(dict):
         if not isinstance(data, dict):
             return data
         else:
-            return AttrDict({key: AttrDict.from_nested_dict(data[key])
-                             for key in data})
+            return AttrDict({key: AttrDict.from_nested_dict(data[key]) for key in data})
 
 
 class StateAttrs(dict):
@@ -159,6 +175,30 @@ class StateAttrs(dict):
         self.__dict__ = device_dict
 
 
+def sync_wrapper(coro):
+    @wraps(coro)
+    def inner_sync_wrapper(self, *args, **kwargs):
+        is_async = None
+        try:
+            # do this first to get the exception
+            # otherwise the coro could be started and never awaited
+            asyncio.get_event_loop()
+            is_async = True
+        except RuntimeError:
+            is_async = False
+
+        if is_async is True:
+            # don't use create_task. It's python3.7 only
+            f = asyncio.ensure_future(coro(self, *args, **kwargs))
+            self.AD.futures.add_future(self.name, f)
+        else:
+            f = run_coroutine_threadsafe(self, coro(self, *args, **kwargs))
+
+        return f
+
+    return inner_sync_wrapper
+
+
 def _timeit(func):
     @functools.wraps(func)
     def newfunc(*args, **kwargs):
@@ -166,7 +206,7 @@ def _timeit(func):
         start_time = time.time()
         result = func(self, *args, **kwargs)
         elapsed_time = time.time() - start_time
-        self.logger.info('function [%s] finished in %s ms', func.__name__, int(elapsed_time * 1000))
+        self.logger.info("function [%s] finished in %s ms", func.__name__, int(elapsed_time * 1000))
         return result
 
     return newfunc
@@ -182,7 +222,7 @@ def _profile_this(fn):
 
         self.pr.disable()
         s = io.StringIO()
-        sortby = 'cumulative'
+        sortby = "cumulative"
         ps = pstats.Stats(self.pr, stream=s).sort_stats(sortby)
         ps.print_stats()
         self.profile = fn + s.getvalue()
@@ -191,8 +231,10 @@ def _profile_this(fn):
 
     return profiled_fn
 
+
 def format_seconds(secs):
     return str(timedelta(seconds=secs))
+
 
 def get_kwargs(kwargs):
     result = ""
@@ -233,7 +275,9 @@ def day_of_week(day):
 
 
 async def run_in_executor(self, fn, *args, **kwargs):
-    completed, pending = await asyncio.wait([self.AD.loop.run_in_executor(self.AD.executor, functools.partial(fn, *args, **kwargs))])
+    completed, pending = await asyncio.wait(
+        [self.AD.loop.run_in_executor(self.AD.executor, functools.partial(fn, *args, **kwargs))]
+    )
     future = list(completed)[0]
     response = future.result()
     return response
@@ -247,12 +291,19 @@ def run_coroutine_threadsafe(self, coro):
             result = future.result(self.AD.internal_function_timeout)
         except asyncio.TimeoutError:
             if hasattr(self, "logger"):
-                self.logger.warning("Coroutine (%s) took too long (%s seconds), cancelling the task...", coro, self.AD.internal_function_timeout)
+                self.logger.warning(
+                    "Coroutine (%s) took too long (%s seconds), cancelling the task...",
+                    coro,
+                    self.AD.internal_function_timeout,
+                )
             else:
                 print("Coroutine ({}) took too long, cancelling the task...".format(coro))
             future.cancel()
+    else:
+        self.logger.warning("LOOP NOT RUNNING. Returning NONE.")
 
     return result
+
 
 def deepcopy(data):
 
@@ -286,9 +337,12 @@ def deepcopy(data):
 
     return result
 
+
 def find_path(name):
-    for path in [os.path.join(os.path.expanduser("~"), ".homeassistant"),
-                 os.path.join(os.path.sep, "etc", "appdaemon")]:
+    for path in [
+        os.path.join(os.path.expanduser("~"), ".homeassistant"),
+        os.path.join(os.path.sep, "etc", "appdaemon"),
+    ]:
         _file = os.path.join(path, name)
         if os.path.isfile(_file) or os.path.isdir(_file):
             return _file
@@ -301,11 +355,13 @@ def single_or_list(field):
     else:
         return [field]
 
+
 def _sanitize_kwargs(kwargs, keys):
     for key in keys:
         if key in kwargs:
             del kwargs[key]
     return kwargs
+
 
 def process_arg(self, arg, args, **kwargs):
     if args:
@@ -316,21 +372,27 @@ def process_arg(self, arg, args, **kwargs):
                     value = int(value)
                     setattr(self, arg, value)
                 except ValueError:
-                    self.logger.warning("Invalid value for %s: %s, using default(%s)", value, getattr(self, arg))
+                    self.logger.warning(
+                        "Invalid value for %s: %s, using default(%s)", value, getattr(self, arg),
+                    )
             if "float" in kwargs and kwargs["float"] is True:
                 try:
                     value = float(value)
                     setattr(self, arg, value)
                 except ValueError:
-                    self.logger.warning("Invalid value for %s: %s, using default(%s)", arg, value, getattr(self, arg))
+                    self.logger.warning(
+                        "Invalid value for %s: %s, using default(%s)", arg, value, getattr(self, arg),
+                    )
             else:
                 setattr(self, arg, value)
+
 
 def find_owner(filename):
     return pwd.getpwuid(os.stat(filename).st_uid).pw_name
 
-def check_path(type, logger, inpath, pathtype="directory", permissions=None):
-    #disable checks for windows platform
+
+def check_path(type, logger, inpath, pathtype="directory", permissions=None):  # noqa: C901
+    # disable checks for windows platform
     if platform.system() == "Windows":
         return
 
@@ -363,25 +425,34 @@ def check_path(type, logger, inpath, pathtype="directory", permissions=None):
                 fullpath = False
             elif not os.path.isdir(directory):
                 if os.path.isfile(directory):
-                    logger.warning("%s: %s exists, but is a file instead of a directory", type,
-    directory)
+                    logger.warning(
+                        "%s: %s exists, but is a file instead of a directory", type, directory,
+                    )
                     fullpath = False
             else:
                 owner = find_owner(directory)
                 if "r" in perms and not os.access(directory, os.R_OK):
-                    logger.warning("%s: %s exists, but is not readable, owner: %s", type, directory, owner)
+                    logger.warning(
+                        "%s: %s exists, but is not readable, owner: %s", type, directory, owner,
+                    )
                     fullpath = False
                 if "w" in perms and not os.access(directory, os.W_OK):
-                    logger.warning("%s: %s exists, but is not writeable, owner: %s", type, directory, owner)
+                    logger.warning(
+                        "%s: %s exists, but is not writeable, owner: %s", type, directory, owner,
+                    )
                     fullpath = False
                 if "x" in perms and not os.access(directory, os.X_OK):
-                    logger.warning("%s: %s exists, but is not executable, owner: %s", type, directory, owner)
+                    logger.warning(
+                        "%s: %s exists, but is not executable, owner: %s", type, directory, owner,
+                    )
                     fullpath = False
         if fullpath is True:
             owner = find_owner(path)
             user = pwd.getpwuid(os.getuid()).pw_name
             if owner != user:
-                logger.warning("%s: %s is owned by %s but appdaemon is running as %s", type, path, owner, user)
+                logger.warning(
+                    "%s: %s is owned by %s but appdaemon is running as %s", type, path, owner, user,
+                )
 
         if file is not None:
             owner = find_owner(file)
@@ -398,8 +469,10 @@ def check_path(type, logger, inpath, pathtype="directory", permissions=None):
         # We just have to skip most of these tests
         pass
 
+
 def str_to_dt(time):
     return dateutil.parser.parse(time)
+
 
 def dt_to_str(dt, tz=None):
     if dt == datetime.datetime(1970, 1, 1, 0, 0, 0, 0):
@@ -409,3 +482,7 @@ def dt_to_str(dt, tz=None):
             return dt.astimezone(tz).isoformat()
         else:
             return dt.isoformat()
+
+
+def convert_json(data, **kwargs):
+    return json.dumps(data, default=str, **kwargs)

@@ -1,10 +1,10 @@
 widget_type: baseentitypicture
-entity: {{entity}}
+entity: "{{entity}}"
 fields:
   title: ""
   base_url: ""
   image_style: ""
-  
+
   img_inernal_src: ""
   img_internal_style: ""
 icons: []

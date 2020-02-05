@@ -28,10 +28,10 @@
 #
 #
 
-head_includes: 
+head_includes:
   - <meta http-equiv="refresh" content="3600">
   - <script type="text/javascript" src="/css/simplyred/js/timer.js"></script>
- 
+
 #
 # Custom body includes - should be a YAML List, e.g.:
 #
@@ -87,7 +87,7 @@ textblur: "color: inherit; text-shadow: 3px 3px 8px #BF7F00, -3px -3px 8px #BF7F
 
 # Be aware that using either of these alternate widget styles also turns off the hover/button press effects!!
 goldbg: "$no_shadow; background-image: url(/css/simplyred/img/goldtexture.jpg); border: ridge 4px gold; border-radius: 10px"
-blackbg: "$no_shadow; background: black; border: 5px solid transparent; padding: 15px; 
+blackbg: "$no_shadow; background: black; border: 5px solid transparent; padding: 15px;
  -webkit-border-image: url(/css/simplyred/img/goldgradient.png) 20 round; /* Safari 3.1-5 */
  -o-border-image: url(/css/simplyred/img/goldgradient.png) 20 round; /* Opera 11-12.1 */
  border-image: url(/css/simplyred/img/goldgradient.png) 20 round; border-radius: 10px"
@@ -102,6 +102,15 @@ scene_title_style: $style_title
 scene_title2_style: $style_title2
 scene_widget_style: $background_style
 scene_state_text_style: "color: white; font-weight: bold"
+
+sequence_icon_on: fas-square
+sequence_icon_off: fas-square
+sequence_icon_style_active: $style_active
+sequence_icon_style_inactive: $style_inactive
+sequence_title_style: $style_title
+sequence_title2_style: $style_title2
+sequence_widget_style: $background_style
+sequence_state_text_style: "color: white; font-weight: bold"
 
 mode_icon_on: fas-arrows-alt
 mode_icon_off: fas-arrows-alt
@@ -417,3 +426,16 @@ heater_slider_style: ""
 heater_widget_style: $background_style
 heater_icon_style_active: $style_active
 heater_icon_style_inactive: $style_inactive
+
+input_text_title_style: $style_title
+input_text_title2_style: $style_title2
+input_text_text_style: "color: $white; font-size: 100%"
+input_text_widget_style: $background_style
+input_text_container_style: ""
+
+input_datetime_title_style: $style_title
+input_datetime_title2_style: $style_title2
+input_datetime_date_style: "color: $white; font-size: 100%"
+input_datetime_time_style: "color: $white; font-size: 100%"
+input_datetime_widget_style: $background_style
+input_datetime_container_style: ""

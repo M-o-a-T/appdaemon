@@ -71,7 +71,7 @@ In every case, the App is responsible for recreating any state it might
 need as if it were the first time it was ever started. If
 ``initialize()`` is called, the App can safely assume that it is either
 being loaded for the first time, or that all callbacks and timers have
-been cancelled. In either case, the App will need to recreate them.
+been canceled. In either case, the App will need to recreate them.
 Depending upon the application, it may be desirable for the App to
 establish a state, such as whether or not a particular light is on,
 within the ``initialize()`` function to ensure that everything is as
@@ -284,6 +284,7 @@ Apps can use arbitrarily complex structures within arguments, e.g.:
 Which can be accessed as a list in python with:
 
 .. code:: python
+
     for entity in self.args["entities"]:
       do some stuff
 
@@ -301,7 +302,7 @@ required:
         type:moisture
         warning_level: 100
         units: %
-        
+
 It is also possible to get some constants like the app directory within apps. This can be accessed using the attribute ``self.app_dir``
 
 secrets
@@ -559,10 +560,13 @@ callback that would otherwise be blocked due to constraint failure
 will now be called. Similarly, if one of the constraints becomes false,
 the next callback that would otherwise have been called will be blocked.
 
-AppDeamon itself supplies the time constraint:
+AppDaemon Constraints
+~~~~~~~~~~~~~~~~~~~~~~~
+
+AppDaemon itself supplies the time constraint:
 
 time
-~~~~
+^^^^
 
 The time constraint consists of 2 variables, ``constrain_start_time``
 and ``constrain_end_time``. Callbacks will only be executed if the
@@ -593,6 +597,7 @@ times that span midnight.
     constrain_start_time: sunset - 00:45:00
     constrain_end_time: sunrise + 00:45:00
 
+
 days
 ^^^^
 
@@ -613,7 +618,7 @@ The HASS plugin supplies several additional different types of constraints:
 -  input\_boolean
 -  input\_select
 -  presence
--  time
+-  time (see `AppDaemon Constraints <APPGUIDE.html#time>`__)
 
 They are described individually below.
 
@@ -652,9 +657,9 @@ according to some flag, e.g., a house mode flag.
 
 .. code:: yaml
 
-     Single value
+    # Single value
     constrain_input_select: input_select.house_mode,Day
-     or multiple values
+    # or multiple values
     constrain_input_select: input_select.house_mode,Day,Evening,Night
 
 presence
@@ -671,10 +676,31 @@ trackers. It takes 3 possible values:
 
     constrain_presence: anyone
     # or
-    constrain_presence: someone
+    constrain_presence: everyone
     # or
     constrain_presence: noone
-    
+
+Callback constraints can also be applied to individual callbacks within
+Apps, see later for more details.
+
+person
+^^^^^^^^
+
+The person constraint will constrain based on presence of person entities
+trackers. It takes 3 possible values:
+
+- ``noone`` - only allow callback execution when no one is home
+- ``anyone`` - only allow callback execution when one or more person is home
+- ``everyone`` - only allow callback execution when everyone is home
+
+.. code:: yaml
+
+    constrain_person: anyone
+    # or
+    constrain_person: everyone
+    # or
+    constrain_person: noone
+
 Callback constraints can also be applied to individual callbacks within
 Apps, see later for more details.
 
@@ -967,10 +993,116 @@ A Final Thought on Threading and Pinning
 
 Although pinning and scheduling has been thoroughly tested, in current real-world applications for AppDaemon, very few of these considerations matter, since in most cases AppDaemon will be able to respond to a callback immediately, and it is unlikely that any significant scheduler queueing will occur unless there are problems with apps blocking threads. At the rate that most people are using AppDaemon, events come in a few times a second, and modern hardware can usually handle the load pretty easily. The considerations above will start to matter more when event rates become a lot faster, by at least an order of magnitude. That is now a possibility with the recent upgrade to the scheduler allowing sub-second tick times, so the ability to lock and pin apps were added in anticipation of new applications for AppDaemon that may require more robust management of apps and much higher event rates.
 
+ASYNC Apps
+----------
+
+Note: This is an advanced feature and should only be used if you understand the usage and implications of async programming
+in Python. If you do not, then the previously described threaded model of apps is much safer and easier to work with.
+
+AppDaemon supports the use of async libraries from within apps as well as allowing a partial or complete async programming
+model. Callback functions can be converted into coroutines by using the `async` keyword during their declaration.
+AppDaemon will automatically detect all the App's coroutines and will schedule their execution on the main async loop.
+This also works for ``initialize()`` and ``terminate()``. Apps can be a mix of `sync` and `async` callbacks as desired.
+A fully async app might look like this:
+
+.. code:: PYTHON
+
+    import hassapi as hass
+
+    class AsyncApp(hass.Hass):
+
+        async def initialize(self):
+            # Maybe access an async library to initialize something
+            self.run_in(self.hass_cb, 10)
+
+        async def my_function(self):
+            # More async stuff here
+
+        async def hass_cb(self, kwargs):
+            # do some async stuff
+
+            # Sleeps are perfectly acceptable
+            await self.sleep(10)
+
+            # Call another coroutine
+            await my_function()
+
+When writing ASYNC apps, please be aware that most of the methods available in ADAPI (generally referenced as ``self.method_name()`` in an app) are async methods. While these coroutines are automatically turned into a ``future`` for you, if you intend to use the data they return you'll need to ``await`` them.
+
+This will not give the expected result:
+
+.. code:: PYTHON
+
+    async def some_method(self):
+        handle = self.run_in(self.cb, 30)
+
+This, however, will:
+
+.. code:: PYTHON
+
+    async def some_method(self):
+        handle = await self.run_in(self.cb, 30)
+
+If you do not need to use the return result of the method, and you do not need to know that it has completed before executing the next line of your code, then you do not need to ``await`` the method.
+
+ASYNC Advantages
+~~~~~~~~~~~~~~~~
+
+- Programming using async constructs can seem natural to advanced users who have used it before, and in some cases, can provide performance benefits depending on the exact nature of the task.
+- Some external libraries are designed to be used in an async environment, and prior to AppDaemon async support it was not possible to make use of such libraries.
+- Scheduling heavily concurrent tasks is very easy using async
+- Using ``sleep()`` in async apps is not harmful to the overall performance of AppDaemon as it is in regular sync apps
+
+ASYNC Caveats
+~~~~~~~~~~~~~
+
+The AppDaemon implementation of ASYNC apps utilizes the same loop as the AppDaemon core. This means that a badly behaved
+app will not just tie up an individual app; it can potentially tie up all other apps, and the internals of AppDaemon.
+For this reason, it is recommended that only experienced users create apps with this model.
+
+
+ASYNC Tools
+~~~~~~~~~~~
+
+AppDaemon supplies a number of helper functions to make things a little easier:
+
+Creating Tasks
+^^^^^^^^^^^^^^
+
+For additional multitasking, Apps are fully able to create tasks or futures, however, the app has the responsibility to
+manage them. In particular, any created tasks or futures must be completed or actively canceled when the app is terminated
+or reloaded. If this is not the case, the code will not reload correctly due to Pyhton's garbage collection strategy. To assist
+with this, AppDaemon has a ``create_task()`` call, which returns a future. Tasks created in this way can be manipulated as
+desired, however, AppDaemon keeps track of them and will automatically cancel any outstanding futures if the app terminates
+or reloads. For this reason, AppDaemon's ``create_task()`` is the recommended way of doing this.
+
+Use of Executors
+^^^^^^^^^^^^^^^^
+
+A standard pattern for running I/O intensive tasks such as file or network access in the async programming model is to
+use executor threads for these types of activities. AppDaemon supplies the ``run_in_executor()`` function to facilitate
+this, which uses a predefined thread-pool for execution. As mentioned above, holding up the loop with any blocking activity
+is harmful not only to the app but all other apps and AppDaemon's internals, so always use an executor for any function
+that may require it.
+
+Sleeping
+^^^^^^^^
+
+Sleeping in Apps is perfectly fine using the async model. For this purpose, AppDaemon provides the ``sleep()`` function.
+If this function is used in a non-async callback, it will raise an exception.
+
+ASYNC Threading Considerations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Bear in mind, that although the async programming model is single threaded, in an event-driven environment such as AppDaemon, concurrency is still possible, whereas in the pinned threading model it is eliminated. This may lead to requirements to lock data structures in async apps.
+- By default, AppDaemon creates a thread for each App (unless you are managing the threads yourself). For a fully async app, the thread will be created but never used.
+- If you have a 100% async environment, you can prevent the creation of any threads by setting ``total_threads: 0`` in ``appdaemon.yaml``
+
+
 State Operations
 ----------------
 
-AppDaemon maintains a master state list segmented by namespace. As state changes are notified by the various plugins, AppDaemon listens and stores the updated state locally.
+AppDaemon maintains a master state list segmented by namespace. As plugins notify state changes, AppDaemon listens and stores the updated state locally.
 
 The MQTT plugin does not use state at all, and it relies on events to trigger actions, whereas the Home Assistant plugin makes extensive use of state.
 
@@ -1325,12 +1457,14 @@ In addition to the HASS and MQTT supplied events, AppDaemon adds 3 more
 events. These are internal to AppDaemon and are not visible on the Home
 Assistant bus:
 
--  ``appd_started`` - fired once when AppDaemon is first started and
-   after Apps are initialized
--  ``plugin_started`` - fired every time AppDaemon detects a Home Assistant
-   restart
--  ``plugin_stopped`` - fired once every time AppDaemon loses its
-   connection with HASS
+-  ``appd_started`` - fired once when AppDaemon is first started and after Apps are initialized. It is fired within the `global` namespace
+- ``app_initialized`` - fired when an App is initialized. It is fired within the `admin` namespace
+- ``app_terminated`` - fired when an App is terminated. It is fired within the `admin` namespace
+-  ``plugin_started`` - fired when a plugin is initialized and properly setup e.g. connection to Home Assistant. It is fired within the plugin's namespace
+-  ``plugin_stopped`` - fired when a plugin terminates, or becomes internally unstable like a disconnection from an external system like an MQTT broker. It is fired within the plugin's namespace
+-  ``service_registered`` - fired when a service is registered in AD. It is fired within the namespace it was registered
+- ``websocket_connected`` - fired when a websocket client connects like the Admin User Interface. It is fired within the `admin` namespace
+- ``websocket_disconnected`` - fired when a websocket client disconnects like the Admin User Interface. It is fired within the `admin` namespace
 
 About Event Callbacks
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1509,7 +1643,7 @@ convenience methods ``log()`` and ``error()``, which are provided as
 part of parent ``AppDaemon`` class, and the call will automatically
 pre-pend the name of the App making the call.
 
-The functions are based on the Python ``logging`` module and are able to pass through parameters for interpolation, and additional parameters such as ``exc_info`` just as with the usual style of invocation. Use of loggers interpolation method over the use of ``format()`` is recomended for performance reasons, as logger will only interpolate of the line is actually written whereas ``format()`` will always do the substitution.
+The functions are based on the Python ``logging`` module and are able to pass through parameters for interpolation, and additional parameters such as ``exc_info`` just as with the usual style of invocation. Use of loggers interpolation method over the use of ``format()`` is recommended for performance reasons, as logger will only interpolate of the line is actually written whereas ``format()`` will always do the substitution.
 
 The ``-D`` option of AppDaemon can be used to specify a global logging level, and Apps can individually have their logging level set as required. This can be achieved using the ``set_log_level()`` API call, or by using the special ``debug`` argument to the apps settings in ``apps.yaml``:
 
@@ -1523,9 +1657,9 @@ In addition, apps can select a default log for the `log()` call using the `log` 
 
     log: test_log
 
-If an App has set a default log other than one of the 4 built in logs, these logs can still be accessed specifically using either the `log=` parameter of the `log()` call, or by getting the appropriate logger object using the `get_user_log()` call, whcih also works for default logs.
+If an App has set a default log other than one of the 4 built in logs, these logs can still be accessed specifically using either the `log=` parameter of the `log()` call, or by getting the appropriate logger object using the `get_user_log()` call, which also works for default logs.
 
-ApDaemon loggin also allows you to use placeholders for the module,
+AppDaemon's logging mechanism also allows you to use placeholders for the module,
 function, and line number. If you include the following in the test of
 your message:
 
@@ -1537,11 +1671,6 @@ your message:
 
 They will automatically be expanded to the appropriate values in the log
 message.
-
-User Defined Logs
------------------
-
-
 
 Getting Information in Apps and Sharing information between Apps
 ----------------------------------------------------------------
@@ -1588,7 +1717,7 @@ from within apps in a different namespace. This is done by simply passing in the
 
 .. code:: python
     ## from within a HASS App, and wanting to access the client Id of the MQTT Plugin
-    
+
     config = self.get_config(namespace = 'mqtt')
     self.log("The Mqtt Client ID is ".format(config["client_id"]))
 
@@ -1708,7 +1837,7 @@ time with the ``-e`` flag as follows:
     2016-09-06 17:16:00 INFO Loading Module: /export/hass/appdaemon_test/conf/test_apps/sunset.py
     ..,
 
-The ``-e`` flag is most useful when used in conjuntion with the ``-s``
+The ``-e`` flag is most useful when used in conjunction with the ``-s``
 flag and optionally the ``-t`` flag. For example, to run from just
 before sunset, for an hour, as fast as possible:
 
@@ -1846,7 +1975,7 @@ to the configured key. A security key is added for the API with the
 Documentation <INSTALL.html>`__
 
 If these conditions are not met, the call will fail with a return code
-of ``401 Not Authorized``. Here is a succesful curl example:
+of ``401 Not Authorized``. Here is a successful curl example:
 
 .. code:: bash
 
@@ -1954,7 +2083,7 @@ want to configure.
             if intent in intents:
                 speech, card, title = intents[intent](data)
                 response = self.format_alexa_response(speech = speech, card = card, title = title)
-                self.log("Recieved Alexa request: {}, answering: {}".format(intent, speech))
+                self.log("Received Alexa request: {}, answering: {}".format(intent, speech))
             else:
                 response = self.format_alexa_response(speech = "I'm sorry, the {} does not exist within AppDaemon".format(intent))
 
@@ -1985,9 +2114,9 @@ want to configure.
 
         def HouseStatus(self):
 
-            status = "The downstairs temperature is {} degrees farenheit,".format(self.entities.sensor.downstairs_thermostat_temperature.state)
-            status += "The upstairs temperature is {} degrees farenheit,".format(self.entities.sensor.upstairs_thermostat_temperature.state)
-            status += "The outside temperature is {} degrees farenheit,".format(self.entities.sensor.side_temp_corrected.state)
+            status = "The downstairs temperature is {} degrees fahrenheit,".format(self.entities.sensor.downstairs_thermostat_temperature.state)
+            status += "The upstairs temperature is {} degrees fahrenheit,".format(self.entities.sensor.upstairs_thermostat_temperature.state)
+            status += "The outside temperature is {} degrees fahrenheit,".format(self.entities.sensor.side_temp_corrected.state)
             status += self.Wendy()
             status += self.Andrew()
             status += self.Jack()
@@ -2025,7 +2154,7 @@ want to configure.
                 "Jack is on the windowsill behind the bed",
                 "Jack is out checking on his clown suit",
                 "Jack is eating his treats",
-                "Jack just went out for a walk in the neigbourhood",
+                "Jack just went out for a walk in the neighbourhood",
                 "Jack is by his bowl waiting for treats"
             ]
 
@@ -2062,7 +2191,7 @@ Similarly, Dialogflow API for Google home is supported - here is the Google vers
             if intent in intents:
                 speech = intents[intent](data)
                 response = self.format_dialogflow_response(speech)
-                self.log("Recieved Dialogflow request: {}, answering: {}".format(intent, speech))
+                self.log("Received Dialogflow request: {}, answering: {}".format(intent, speech))
             else:
                 response = self.format_dialogflow_response(speech = "I'm sorry, the {} does not exist within AppDaemon".format(intent))
 
@@ -2093,9 +2222,9 @@ Similarly, Dialogflow API for Google home is supported - here is the Google vers
 
         def HouseStatus(self):
 
-            status = "The downstairs temperature is {} degrees farenheit,".format(self.entities.sensor.downstairs_thermostat_temperature.state)
-            status += "The upstairs temperature is {} degrees farenheit,".format(self.entities.sensor.upstairs_thermostat_temperature.state)
-            status += "The outside temperature is {} degrees farenheit,".format(self.entities.sensor.side_temp_corrected.state)
+            status = "The downstairs temperature is {} degrees fahrenheit,".format(self.entities.sensor.downstairs_thermostat_temperature.state)
+            status += "The upstairs temperature is {} degrees fahrenheit,".format(self.entities.sensor.upstairs_thermostat_temperature.state)
+            status += "The outside temperature is {} degrees fahrenheit,".format(self.entities.sensor.side_temp_corrected.state)
             status += self.Wendy()
             status += self.Andrew()
             status += self.Jack()
@@ -2133,7 +2262,7 @@ Similarly, Dialogflow API for Google home is supported - here is the Google vers
                 "Jack is on the windowsill behind the bed",
                 "Jack is out checking on his clown suit",
                 "Jack is eating his treats",
-                "Jack just went out for a walk in the neigbourhood",
+                "Jack just went out for a walk in the neighbourhood",
                 "Jack is by his bowl waiting for treats"
             ]
 
@@ -2380,8 +2509,148 @@ You can use this with 2 separate constraints like so:
         handle = self.run_every(self.up_callback, time, 1, sun="up")
         handle = self.run_every(self.down_callback, time, 1, sun="down")
 
+Sequences
+---------
+
+AppDaemon supports `sequences` as a simple way of re-using predefined steps of commands. The initial usecase for sequences
+is to allow users to create scenes within AppDaemon, however they are useful for many other things. Sequences
+are fairly simple and allow the user to define 2 types of activity:
+
+- A call_service command with arbitrary parameters
+- A configurable delay between steps.
+
+In the case of a scene, of course you would not want to use the delay, and would just list all the devices to be switched
+on or off, however, if you wanted a light to come on for 30 seconds, you could use a script to turn the light on,
+wait 30 seconds and then turn it off. Unlike in synchronous apps, delays are fine in scripts as they will
+not hold the apps_thread up.
+
+There are 2 types of sequence - predefined sequences and inline sequences.
+
+Defining a Sequence
+~~~~~~~~~~~~~~~~~~~
+
+A predefined sequence is created by addin a ``sequence`` section to your apps.yaml file. If you have apps.yaml split into
+multiple files, you can have sequences defined in each one if desired. For clarity, it is strongly recommended that
+sequences are created in their own standalone yaml files, ideally in a separate directory from the app argument files.
+
+An example of a simple sequence entry to create a couple of scenes might be:
+
+.. code:: yaml
+
+    sequence:
+      office_on:
+        name: Office On
+        steps:
+        - homeassistant/turn_on:
+            entity_id: light.office_1
+            brightness: 254
+        - homeassistant/turn_on:
+            entity_id: light.office_2
+            brightness: 254
+      office_off:
+        name: Office Off
+        steps:
+        - homeassistant/turn_off:
+            entity_id: light.office_1
+        - homeassistant/turn_off:
+            entity_id: light.office_2
 
 
+The names of the sequences defined above are ``sequence.office_on`` and ``sequence.office_off``. The ``name`` entry is optional and is used to provide
+a friendly name for HADashboard. The ``steps`` entry is simply a list of steps to be taken. They will be processed in
+the order defined, however without any delays the steps will be processed practically instantaneously.
 
+A sequence to turn a light on then off after a delay might look like this:
 
+.. code:: yaml
 
+    sequence:
+      outside_motion_light:
+        name: Outside Motion
+        steps:
+        - homeassistant/turn_on:
+            entity_id: light.outside
+            brightness: 254
+        - sleep: 30
+        - homeassistant/turn_off:
+            entity_id: light.outside
+
+If you prefer, you can use YAML's inline capabilities for a more compact representation that looks better for longer sequences:
+
+.. code:: yaml
+
+    sequence:
+      outside_motion_light:
+        name: Outside Motion
+        steps:
+        - homeassistant/turn_on: {"entity_id": "light.outside", "brightness": 254}
+        - sleep: 30
+        - homeassistant/turn_off: {"entity_id": "light.outside"}
+
+Sequences can be cretaed that will loop forever by adding the value ``loop: True`` to the sequence:
+
+.. code:: yaml
+
+    sequence:
+      outside_motion_light:
+        name: Outside Motion
+        loop; True
+        steps:
+        - homeassistant/turn_on: {"entity_id": "light.outside", "brightness": 254}
+        - sleep: 30
+        - homeassistant/turn_off: {"entity_id": "light.outside"}
+
+This sequence once started will loop until either the sequence is canceled, the app is restarted or terminated, or AppDaemon is shutdown.
+
+By default, a sequence will run on entities in the current namespace, however , the namespace can be specified on a per call
+basis if required.
+
+.. code:: yaml
+
+    sequence:
+      office_on:
+        name: Office On
+        steps:
+        - homeassistant/turn_on:
+            entity_id: light.office_1
+            brightness: 254
+            namespace: "hass1"
+        - homeassistant/turn_on:
+            entity_id: light.office_2
+            brightness: 254
+            namespace: "hass2"
+
+Just like app parameters and code, sequences will be reloaded after any change has been made allowing scenes to be
+developed and modified without restarting AppDaemon.
+
+Running a Sequence
+~~~~~~~~~~~~~~~~~~
+
+Once you have the sequence defined, you can run it in one of 2 ways:
+
+- using the ``self.run_sequence()`` api call
+- Using a sequence widget in HADashboard
+
+A call to run the above sequence would look like this:
+
+.. code:: python
+
+    handle = self.run_sequence("sequence.outside_motion_light")
+
+The handle value can be used to terminate a running sequence by supplying it to the ``cancel_sequence()`` call.
+
+When an app is terminated or reloaded, all running sequences that it started are immediately terminated. There is no way
+to terminate a sequence started using HADashboard.
+
+Inline Sequences
+~~~~~~~~~~~~~~~~
+
+Sequences can be run without the need to predefine them by specifying the steps to the ``run_sequence()`` command like so:
+
+.. code:: python
+
+     handle = self.run_sequence([
+            {'light/turn_on': {'entity_id': 'light.office_1', 'brightness': '5', 'color_name': 'white', 'namespace': 'default'}},
+            {'sleep': 1},
+            {'light/turn_off': {'entity_id': 'light.office_1'}},
+            ])

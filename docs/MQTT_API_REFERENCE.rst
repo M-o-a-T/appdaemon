@@ -54,16 +54,16 @@ Reference
 Services
 --------
 
-.. automethod:: appdaemon.plugins.mqtt.mqttapi.Mqtt.mqtt_subscribe
-.. automethod:: appdaemon.plugins.mqtt.mqttapi.Mqtt.mqtt_unsubscribe
-.. automethod:: appdaemon.plugins.mqtt.mqttapi.Mqtt.mqtt_publish
-.. automethod:: appdaemon.plugins.mqtt.mqttapi.Mqtt.is_client_connected
+.. autofunction:: appdaemon.plugins.mqtt.mqttapi.Mqtt.mqtt_subscribe
+.. autofunction:: appdaemon.plugins.mqtt.mqttapi.Mqtt.mqtt_unsubscribe
+.. autofunction:: appdaemon.plugins.mqtt.mqttapi.Mqtt.mqtt_publish
+.. autofunction:: appdaemon.plugins.mqtt.mqttapi.Mqtt.is_client_connected
 
 
 Events
 ------
 
-.. automethod:: appdaemon.plugins.mqtt.mqttapi.Mqtt.listen_event
+.. autofunction:: appdaemon.plugins.mqtt.mqttapi.Mqtt.listen_event
 
 MQTT Config
 -----------
@@ -78,4 +78,3 @@ See More
 
 Read the `AppDaemon API Reference <AD_API_REFERENCE.html>`__ to learn other inherited helper functions that
 can be used by Hass applications.
-

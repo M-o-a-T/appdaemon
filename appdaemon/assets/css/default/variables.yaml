@@ -10,7 +10,7 @@
 #    1. Create a new directory under custom_css
 #    2. copy these files over
 #    3. EDIT
-#    4. Select the new dir as the "skin" argument of any 
+#    4. Select the new dir as the "skin" argument of any
 #       dashboards you want to use it
 # ----------------------------------------------------------------------------
 
@@ -84,6 +84,15 @@ scene_title_style: $style_title
 scene_title2_style: $style_title2
 scene_widget_style: $background_style
 scene_state_text_style: "color: $white"
+
+sequence_icon_on: fas-square
+sequence_icon_off: fas-square
+sequence_icon_style_active: $style_active
+sequence_icon_style_inactive: $style_inactive
+sequence_title_style: $style_title
+sequence_title2_style: $style_title2
+sequence_widget_style: $background_style
+sequence_state_text_style: "color: $white"
 
 mode_icon_on: fas-arrows-alt
 mode_icon_off: fas-arrows-alt
@@ -404,3 +413,16 @@ heater_slider_style: ""
 heater_widget_style: $background_style
 heater_icon_style_active: $style_active
 heater_icon_style_inactive: $style_inactive
+
+input_text_title_style: $style_title
+input_text_title2_style: $style_title2
+input_text_text_style: "color: $white; font-size: 100%"
+input_text_widget_style: $background_style
+input_text_container_style: ""
+
+input_datetime_title_style: $style_title
+input_datetime_title2_style: $style_title2
+input_datetime_date_style: "color: $white; font-size: 100%"
+input_datetime_time_style: "color: $white; font-size: 100%"
+input_datetime_widget_style: $background_style
+input_datetime_container_style: ""

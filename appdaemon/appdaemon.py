@@ -5,7 +5,6 @@ import threading
 
 
 class AppDaemon:
-
     def __init__(self, logging, loop, **kwargs):
 
         #
@@ -19,9 +18,11 @@ class AppDaemon:
         import appdaemon.threading
         import appdaemon.app_management as apps
         import appdaemon.callbacks as callbacks
+        import appdaemon.futures as futures
         import appdaemon.state as state
         import appdaemon.events as events
         import appdaemon.services as services
+        import appdaemon.sequences as sequences
         import appdaemon.scheduler as scheduler
 
         self.logging = logging
@@ -29,6 +30,7 @@ class AppDaemon:
         self.logger = logging.get_logger()
         self.threading = None
         self.callbacks = None
+        self.futures = None
         self.state = None
 
         self.config = kwargs
@@ -82,6 +84,7 @@ class AppDaemon:
         utils.process_arg(self, "time_zone", kwargs)
 
         self.tz = None
+        self.loop = loop
 
         self.logfile = None
         self.errfile = None
@@ -174,10 +177,14 @@ class AppDaemon:
         self.services = services.Services(self)
 
         #
+        # Set up sequences
+        #
+        self.sequences = sequences.Sequences(self)
+
+        #
         # Set up scheduler
         #
         self.sched = scheduler.Scheduler(self)
-
 
         #
         # Set up state
@@ -193,6 +200,11 @@ class AppDaemon:
         # Set up callbacks
         #
         self.callbacks = callbacks.Callbacks(self)
+
+        #
+        # Set up futures
+        #
+        self.futures = futures.Futures(self)
 
         if self.apps is True:
             if self.app_dir is None:
@@ -213,9 +225,13 @@ class AppDaemon:
 
             self.threading = appdaemon.threading.Threading(self, kwargs)
 
-        self.loop = loop
-
         self.stopping = False
+
+        #
+        # Set up Executor ThreadPool
+        #
+        if "threadpool_workers" in kwargs:
+            self.threadpool_workers = int(kwargs["threadpool_workers"])
 
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.threadpool_workers)
 
@@ -276,4 +292,3 @@ class AppDaemon:
 
             self.admin_loop = admin_loop.AdminLoop(self)
             self.loop.create_task(self.admin_loop.loop())
-

@@ -2,7 +2,7 @@ Configuration
 -------------
 
 When you have AppDaemon (AD) installed by either method you are ready to
-start working on the appdaemon.yaml file. For docker users, you will
+start working on the ``appdaemon.yaml`` file. For docker users, you will
 already have a skeleton to work with. For pip users, you need to create
 a configuration directory somewhere (e.g., ``/home/homeassistant/conf``)
 and create a file in there called ``appdaemon.yaml``.
@@ -59,7 +59,7 @@ A simple logs section might look like this:
         name: TestLog
         filename: /export/pegasus/hass/appdaemon_test/logs/test.log
 
-All directives are optional with the exception of ``name`` for user defined logs. The dircetives have the following meanings:
+All directives are optional with the exception of ``name`` for user defined logs. The directives have the following meanings:
 
 The directives are as follows:
 
@@ -105,14 +105,10 @@ The ``appdaemon:`` section has a number of directives:
 
 -  ``filters`` (optional) - see below.
 -  ``plugins`` (required) - see below.
--  ``latitude`` (required) - latitude for AppDaemon to use.
--  ``longitude`` (required) - longitude for AppDaemon to use.
--  ``elevation`` (required) - elevation for AppDaemon to use.
--  ``time_zone`` (required) - timezone for AppDaemon to use.
--  ``api_key`` (optional) - adds the requirement for AppDaemon API calls to provide a key in the header of a request.
--  ``api_ssl_certificate`` (optional) - certificate to use when running
-   the API over SSL.
--  ``api_ssl_key`` (optional) - key to use when running the API over SSL.
+-  ``latitude`` (required) - latitude for AppDaemon to use (decimal format).
+-  ``longitude`` (required) - longitude for AppDaemon to use (decimal format).
+-  ``elevation`` (required) - elevation for AppDaemon to use in meters above sea level.
+-  ``time_zone`` (required) - timezone for AppDaemon to use (e.g. America/New_York).
 -  ``app_dir`` (Optional) - This can be used to place one's apps in a directory, other than under the config directory.
 -  ``exclude_dirs`` (optional) - a list of subdirectories to ignore under the apps directory when looking for apps
 - ``missing_app_warnings`` (optional) - by default, AppDaemon will log a warning if it finds a python file that has no associated configuration in an apps.yaml file. If this parameter is set to ``1`` the warning will be suppressed. This allows non-appdaemon python files to be distributed along with apps.
@@ -140,6 +136,7 @@ The following items provide a high level of control over AppDaemon's internal fu
    running the apps. Normally, AppDaemon will create enough threads to provide one per app, or default to 10 if app pinning is turned off. Setting this to a value will turn off automatic thread management.
 -  ``pin_apps`` (optional) - When true (the default) Apps will be pinned to a particular thread which avoids complications around re-entrant code and locking of instance variables
 -  ``pin_threads`` (optional) - Number of threads to use for pinned apps, allowing the user to section off a sub-pool just for pinned apps. Default is to use all threads for pinned apps.
+- ``threadpool_workers`` (optional) - the number of max_workers threads to be used by AD internally to execute calls asynchronously. This defaults to ``10``.
 - ``load_distribution`` - Algorithm to use for load balancing between unpinned apps. Can be ``roundrobin`` (the default), ``random`` or ``load``
 -  ``timewarp`` (optional) - equivalent to the command line flag ``-t`` but will take precedence
 -  ``qsize_warning_threshold`` - total number of items on thread queues before a warning is issued, defaults to 50
@@ -360,7 +357,7 @@ HASS Plugin Startup Conditions
 
 The HASS plugin has the ability to pause startup until various criteria have been met. This can be useful to avoid running apps that require certain entities to exist or to wait for an event to happen before the apps are started. There are 2 types of startup criteria, and they are added :
 
-- appdaemon_startup_conditions - conditions that must be met when appdeamon starts up
+- appdaemon_startup_conditions - conditions that must be met when AppDaemon starts up
 - plugin_startup_conditions - conditions that must be met when HASS restarts while AppDaemon is up
 
 AppDamon will pause the startup of the plugin until the conditions have been met. In particular, apps will not have their ``initialize()`` functions run until the conditions have been met. Each set of conditions takes the same format, and there are 3 types of conditions:
@@ -446,8 +443,8 @@ To configure the MQTT plugin, in addition to the required parameters above, you 
 -  ``birth_topic:`` (optional) This is the topic other clients can subscribe to, to pick up the data sent by the client, when the plugin connects to the broker. If not specified, one is auto-generated
 -  ``birth_payload:`` (optional) This is the payload sent by the plugin when it connects to the broker. If not specified, it defaults to ``online``
 -  ``birth_retain:`` (optional) This tells the broker if it should retain the birth message. If not specified, it defaults to ``True``
--  ``will_topic:`` (optional) This is the topic other clients can subscribe to, to pick up the data sent by the broker, when the plugin unceremonously disconnects from the broker. If not specified, one is auto-generated
--  ``will_payload:`` (optional) This is the payload sent by the broker when the plugin unceremonously disconnects from the broker. If not specified, it defaults to ``offline``
+-  ``will_topic:`` (optional) This is the topic other clients can subscribe to, to pick up the data sent by the broker, when the plugin unceremoniously disconnects from the broker. If not specified, one is auto-generated
+-  ``will_payload:`` (optional) This is the payload sent by the broker when the plugin unceremoniously disconnects from the broker. If not specified, it defaults to ``offline``
 -  ``will_retain:`` (optional) This tells the broker if it should retain the will message. If not specified, it defaults to ``True``
 - ``shutdown_payload:`` (optional) This is the payload sent to the broker when the plugin disconnects from the broker cleanly. It uses the same topic as the ``will_topic``, and if not specified, defaults to the same payload message and ``will_payload``
 - ``force_start:`` (optional) Normally when AD restarts, and the plugin cannot confirm connection to the MQTT broker, it keeps retrying until it has established a connection; this can prevent AD from starting up completely. This can be problematic, if AD is trying to connect to a Cloud broker, and the internet is down. If one is certain of the broker details being correct, and there is a possibility of the broker bring down (e.g., loss of internet connection if using an external broker), the ``force_start`` flag can be set to ``True``. This way AD will start up as usual, and when the broker is online, the plugin will connect to it. This defaults to ``False``
@@ -519,14 +516,15 @@ when we first run it.
 Configuring the HTTP Component
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The HTTP component provides a unified front end to `Apdaemon's Admin Interface`, `HADashboard`, and the `AppDaemon API`. It requires some initial configuration, but the dashboard and admin interface can be separately enabled or disabled.
+The HTTP component provides a unified front end to `AppDaemon's Admin Interface`, `HADashboard`, and the `AppDaemon API`. It requires some initial configuration, but the dashboard and admin interface can be separately enabled or disabled. This component also creates a folder in the configuration directory called ``web``, if it doesn't exist. To serve custom static content like images, videos or html pages, simply drop the content into the web folder and it becomes available via the browser or dashboard. Content stored in this folder can be accessed using ``http://AD_IP:Port/web/<content to be accessed>``. Where `AD_IP:Port` is the url as defined below using the http component.
 
 It has it's own top-level section in AppDaemon.yaml, and one mandatory argument, ``url``:
 
-.. code::
+.. code:: yaml
 
-http:
-url: http://192.168.1.20:5050
+    http:
+        url: http://192.168.1.20:5050
+
 
 -  ``url`` - the URL you want the HTTP component to listen on
 
@@ -560,6 +558,35 @@ AppDaemon uses websockets as the default protocol for streaming events from AppD
     http:
         transport: socketio
 
+Additionally, arbitrary headers can be supplied in all server responses from AppDaemon with this configuration:
+
+.. code:: yaml
+
+    http:
+      headers:
+        My-Header-Here: "The Value Of My Header"
+
+Headers are especially useful for dealing with CORS. In order to allow CORS from any domain, consider the following configuration:
+
+.. code:: yaml
+
+    http:
+      headers:
+        Access-Control-Allow-Origin: "*"
+
+This component can also be used to setup custom static directories, which has contents within it that needs to be served using
+AD's internal web server. This can range from images, videos, html pages and the likes. To do this, consider the configuration below:
+
+.. code:: yaml
+
+    http:
+      custom_dirs:
+        videos: /home/pi/video_clips
+        pictures: /home/pi/pictures
+
+The above configuration assumes that the user has a folder, that has stored within it video clips from like cameras. To access
+the videos stored in the video_clip folder via a browser or Dashboard, the url can be used ``http://AD_IP:Port/videos/<video to be accessed>``. Like wise, the pictures can be accessed using ``http://AD_IP:Port/pictures/<picture to be accessed>``.
+
 Configuring the Dashboard
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -572,11 +599,45 @@ Configuring the API
 
 The AppDaemon App API is configured by adding a top-level directive to appdaemon.yaml:
 
-.. code::
+.. code:: yaml
 
     api:
 
 It takes no arguments.
+
+Configuring the Admin Interface
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Admin Interface, new in 4.0 is a new front end to AppDaemon that allows you to monitor it's inner workings such as
+thread activity, registered callbacks and entities. Over time it is expected to evolve into a full management tool
+for AppDaemon allowing the user to configure, troubleshoot and monitor all of AppDaemon's functions.
+
+The Admin Interface is configured by first adding the HTTP Component and then also adding the top-level directive to appdaemon.yaml:
+
+.. code:: yaml
+
+    admin:
+
+The Interface can be accessed using a web browser and pointing it to the HTTP component URL.
+
+the `admin` directive takes a number of configuration items:
+
+- ``title:`` The title to be used for the browser window
+- ``stats_update:`` Frequency with which stats are updated in the interface. Allowed values are ``none``, ``batch``,
+``realtime`` (default). ``none`` will turn off updates, ``batch`` will update the stats every time the utility loop
+executes, usually every second. ``realtime`` is recommended for most applications, although if you have a very busy
+system, operating with sub-second callbacks you may prefer to use ``batch`` for performance reasons.
+
+Accessing Directories via Apps
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Directories used by AD internally either declared by the user or not, can be accessed by the user via apps. The following directories
+are available:
+
+- ``configuration``: self.config_dir
+- ``apps``: self.app_dir
+- ``dashboard``: self.dashboard_dir
+
 
 Example Apps
 ------------

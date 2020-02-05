@@ -8,6 +8,8 @@ from appdaemon.appdaemon import AppDaemon
 
 
 class Entities:
+    def __init__(self):
+        pass
 
     def __get__(self, instance, owner):
         stateattrs = utils.StateAttrs(instance.get_state())
@@ -18,8 +20,9 @@ class Entities:
 # Locking decorator
 #
 
+
 def app_lock(f):
-    """ Synchronization decorator. """
+    """Synchronization decorator."""
 
     @wraps(f)
     def f_app_lock(*args, **kw):
@@ -30,11 +33,12 @@ def app_lock(f):
             return f(*args, **kw)
         finally:
             self.lock.release()
+
     return f_app_lock
 
 
 def global_lock(f):
-    """ Synchronization decorator. """
+    """Synchronization decorator."""
 
     @wraps(f)
     def f_global_lock(*args, **kw):
@@ -45,6 +49,7 @@ def global_lock(f):
             return f(*args, **kw)
         finally:
             self.AD.global_lock.release()
+
     return f_global_lock
 
 
@@ -55,7 +60,7 @@ class ADBase:
 
     entities = Entities()
 
-    def __init__(self, ad: AppDaemon, name, logging,  args, config, app_config, global_vars):
+    def __init__(self, ad: AppDaemon, name, logging, args, config, app_config, global_vars):
 
         # Store args
 
@@ -69,6 +74,11 @@ class ADBase:
         self.namespace = "default"
         self.app_dir = self.AD.app_dir
         self.config_dir = self.AD.config_dir
+        self.dashboard_dir = None
+
+        if self.AD.http is not None:
+            self.dashboard_dir = self.AD.http.dashboard_dir
+
         self.logger = self._logging.get_child(name)
         self.err = self._logging.get_error().getChild(name)
         self.user_logs = {}
@@ -82,18 +92,20 @@ class ADBase:
 
         self.constraints = []
 
-
     #
     # API/Plugin
     #
 
     def get_ad_api(self):
-        api = adapi.ADAPI(self.AD, self.name, self._logging, self.args, self.config, self.app_config, self.global_vars)
+        api = adapi.ADAPI(self.AD, self.name, self._logging, self.args, self.config, self.app_config, self.global_vars,)
 
         return api
 
-    def get_plugin_api(self, plugin_name):
-        return utils.run_coroutine_threadsafe(self, self.AD.plugins.get_plugin_api(plugin_name, self.name, self._logging, self.args, self.config, self.app_config, self.global_vars))
+    @utils.sync_wrapper
+    async def get_plugin_api(self, plugin_name):
+        return await self.AD.plugins.get_plugin_api(
+            plugin_name, self.name, self._logging, self.args, self.config, self.app_config, self.global_vars,
+        )
 
     #
     # Constraints
