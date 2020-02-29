@@ -352,6 +352,9 @@ class Threading:
             else:
                 self.diag.info("%s calling %s callback %s", thread_id, type, callback)
 
+        appinfo = self.AD.app_management.get_app_info(app)
+        appentity = "{}.{}".format(appinfo["type"], app)
+
         now = await self.AD.sched.get_now()
         if callback == "idle":
             start = utils.str_to_dt(
@@ -366,7 +369,10 @@ class Threading:
                     await self.get_state("_threading", "admin", "thread.{}".format(thread_id)),
                 )
             await self.add_to_state("_threading", "admin", "sensor.threads_current_busy", -1)
-            await self.add_to_attr("_threading", "admin", "app.{}".format(app), "callbacks", 1)
+
+            await self.add_to_attr("_threading", "admin", appentity, "totalcallbacks", 1)
+            await self.add_to_attr("_threading", "admin", appentity, "instancecallbacks", 1)
+
             await self.add_to_attr(
                 "_threading", "admin", "{}_callback.{}".format(type, uuid), "executed", 1,
             )
@@ -418,7 +424,7 @@ class Threading:
                 is_alive=self.threads[thread_id]["thread"].is_alive(),
                 pinned_apps=await self.get_pinned_apps(thread_id),
             )
-        await self.set_state("_threading", "admin", "app.{}".format(app), state=callback)
+        await self.set_state("_threading", "admin", appentity, state=callback)
 
     #
     # Pinning
@@ -708,17 +714,19 @@ class Threading:
         unconstrained = True
         #
         # Argument Constraints
+        # (plugins have no args so skip if necessary)
         #
-        for arg in self.AD.app_management.app_config[name].keys():
-            constrained = await self.check_constraint(
-                arg, self.AD.app_management.app_config[name][arg], self.AD.app_management.objects[name]["object"],
-            )
-            if not constrained:
+        if name in self.AD.app_management.app_config:
+            for arg in self.AD.app_management.app_config[name].keys():
+                constrained = await self.check_constraint(
+                    arg, self.AD.app_management.app_config[name][arg], self.AD.app_management.objects[name]["object"],
+                )
+                if not constrained:
+                    unconstrained = False
+            if not await self.check_time_constraint(self.AD.app_management.app_config[name], name):
                 unconstrained = False
-        if not await self.check_time_constraint(self.AD.app_management.app_config[name], name):
-            unconstrained = False
-        elif not await self.check_days_constraint(self.AD.app_management.app_config[name], name):
-            unconstrained = False
+            elif not await self.check_days_constraint(self.AD.app_management.app_config[name], name):
+                unconstrained = False
 
         #
         # Callback level constraints
@@ -932,6 +940,8 @@ class Threading:
 
     def report_callback_sig(self, name, type, funcref, args):
 
+        error_logger = logging.getLogger("Error.{}".format(name))
+
         callback_args = {
             "scheduler": {"count": 1, "signature": "f(self, kwargs)"},
             "state": {"count": 5, "signature": "f(self, entity, attribute, old, new, kwargs)"},
@@ -941,25 +951,39 @@ class Threading:
             "terminate": {"count": 0, "signature": "terminate()"},
         }
 
-        sig = inspect.signature(funcref)
+        try:
+            sig = inspect.signature(funcref)
 
-        if type in callback_args:
-            if len(sig.parameters) != callback_args[type]["count"]:
-                self.logger.warning(
-                    "Suspect incorrect signature type for callback %s() in %s, should be %s - discarding",
-                    funcref.__name__,
-                    name,
-                    callback_args[type]["signature"],
-                )
-            error_logger = logging.getLogger("Error.{}".format(name))
+            if type in callback_args:
+                if len(sig.parameters) != callback_args[type]["count"]:
+                    self.logger.warning(
+                        "Suspect incorrect signature type for callback %s() in %s, should be %s - discarding",
+                        funcref.__name__,
+                        name,
+                        callback_args[type]["signature"],
+                    )
+                error_logger = logging.getLogger("Error.{}".format(name))
+                error_logger.warning("-" * 60)
+                error_logger.warning("Unexpected error in worker for App %s:", name)
+                error_logger.warning("Worker Ags: %s", args)
+                error_logger.warning("-" * 60)
+                error_logger.warning(traceback.format_exc())
+                error_logger.warning("-" * 60)
+                if self.AD.logging.separate_error_log() is True:
+                    self.logger.warning("Logged an error to %s", self.AD.logging.get_filename("error_log"))
+
+            else:
+                self.logger.error("Unknown callback type: %s", type)
+
+        except ValueError:
+            self.logger.error("Error in callback signature in %s, for App=%s", funcref, name)
+        except BaseException:
             error_logger.warning("-" * 60)
-            error_logger.warning("Unexpected error in worker for App %s:", name)
-            error_logger.warning("Worker Ags: %s", args)
+            error_logger.warning("Unexpected error validating callback format in %s, for App=%s", funcref, name)
             error_logger.warning("-" * 60)
             error_logger.warning(traceback.format_exc())
             error_logger.warning("-" * 60)
             if self.AD.logging.separate_error_log() is True:
-                self.logger.warning("Logged an error to %s", self.AD.logging.get_filename("error_log"))
-
-        else:
-            self.logger.error("Unknown callback type: %s", type)
+                self.logger.warning(
+                    "Logged an error to %s", self.AD.logging.get_filename("error_log"),
+                )

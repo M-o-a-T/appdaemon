@@ -14,99 +14,80 @@ function getCookie(cname) {
     return "";
 }
 
-function ha_status(stream, dash, widgets, transport)
+function get_monitored_entities(widgets)
 {
+    index = 0;
+    entities = [];
+    Object.keys(widgets).forEach(function (key) {
+        var value = widgets[key];
+        elen = value.monitored_entities.length;
+        if ("resident_namespace" in value.parameters)
+        {
+            ns = value.parameters.resident_namespace
+        }
+        else
+        {
+            ns = value.parameters.namespace;
+        }
+        for (i=0;i < elen;i++)
+        {
+            entities[index++] = {entity: value.monitored_entities[i].entity, namespace: ns, widget: value}
+        }
+});
+    return entities
+}
 
-    if (transport === "ws")
+var DashStream = function(transport, protocol, domain, port, title, widgets)
+{
+    var self = this;
+
+    this.on_connect = function(data)
     {
-        var webSocket = new ReconnectingWebSocket(stream);
+        // Grab state
 
-        webSocket.onopen = function (event)
+        self.stream.get_state('*', '*', self.populate_dash);
+
+        // subscribe to all events
+
+        self.stream.listen_event('*', '__HADASHBOARD_EVENT', self.update_dash);
+
+        // Subscribe to just the entities we care about for this dashboard
+
+        entities = get_monitored_entities(widgets);
+        elen = entities.length;
+        for (i=0;i < elen;i++)
         {
-            var request = {
-                request_type: 'hello',
-                data: {
-                    client_name: dash
-                }
-            };
+            self.stream.listen_state(entities[i].namespace, entities[i].entity, self.update_dash)
+        }
 
-            if (getCookie('adcreds') !== '') {
-                var creds = getCookie('adcreds');
-                creds = creds.substring(1, (creds.length - 1));
-                request['data']['cookie'] = creds
-            }
+    };
 
-            webSocket.send(JSON.stringify(request));
-        };
-
-        webSocket.onmessage = function (event)
-        {
-            var data = JSON.parse(event.data);
-
-            // Stream Authorized
-            if (data.response_type === "hello" && data.response_success === true)
-            {
-                webSocket.send(JSON.stringify({
-                    request_type: 'listen_state',
-                    data: {
-                        namespace: '*',
-                        entity_id: '*'
-                    }
-                }));
-
-                webSocket.send(JSON.stringify({
-                    request_type: 'listen_event',
-                    data: {
-                        namespace: '*',
-                        event: '*'
-                    }
-                }));
-
-                return
-            }
-
-            // Stream Error
-            if (data.response_type === "error")
-            {
-                console.log('Stream Error', data.msg);
-                webSocket.refresh();
-                return
-            }
-
-            update_dash(data)
-        };
-
-        webSocket.onclose = function (event)
-        {
-            //window.alert("Server closed connection")
-           // window.location.reload(false);
-        };
-
-        webSocket.onerror = function (event)
-        {
-            //window.alert("Error occured")
-            //window.location.reload(true);
-        };
-    }
-    else
+    this.on_message = function(data)
     {
-        var iosocket = io.connect(stream);
+        console.log("Generic message", data)
+    };
 
-        iosocket.on("connect", function()
-        {
-           iosocket.emit("up", dash);
-        });
-
-        iosocket.on("down", function(msg)
-        {
-            var data = JSON.parse(msg);
-            update_dash(data)
-        });
-
-    }
-
-    this.update_dash = function(data)
+    this.on_disconnect = function(data)
     {
+        console.log("Disconnect", data)
+    };
+
+    this.populate_dash = function(data) {
+        {
+            entities = get_monitored_entities(widgets);
+            elen = entities.length;
+            for (i = 0; i < elen; i++) {
+                entity = entities[i].entity;
+                ns = entities[i].namespace;
+                widget = entities[i].widget;
+                widget.set_state(widget, data.data[ns][entity]);
+            }
+        }
+    };
+
+    this.update_dash = function(msg)
+    {
+        data = msg.data;
         if (data.event_type === "__HADASHBOARD_EVENT")
         {
             if (data.data.command === "navigate")
@@ -151,9 +132,11 @@ function ha_status(stream, dash, widgets, transport)
                 widgets[key].on_ha_data(data);
             }
         })
-    }
+    };
 
-}
+    this.stream = new ADStream(transport, protocol, domain, port, title, this.on_connect, this.on_message, this.on_disconnect);
+
+};
 
 var inheritsFrom = function (child, parent) {
     child.prototype = Object.create(parent.prototype);
@@ -162,6 +145,7 @@ var inheritsFrom = function (child, parent) {
 var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, callbacks)
 {
     child = this;
+    child.monitored_entities = monitored_entities;
     child.url = url;
 
     // Function definitions
@@ -254,72 +238,56 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
         self.ViewModel[field](self.convert_icon(self, value))
     };
 
-    this.get_state = function(child, base_url, entity)
+    this.set_state = function(child, data)
     {
-        if ("resident_namespace" in parameters)
+        if (data == null || data.state == null)
         {
-            ns = parameters.resident_namespace
+            if ("title" in child.ViewModel)
+            {
+                child.ViewModel.title("entity not found: " + child.parameters.entity);
+            }
+            else
+            {
+                console.log("Entity not found: " + child.parameters.entity)
+            }
         }
         else
         {
-            ns = parameters.namespace;
+            if ("use_hass_icon" in child.parameters &&
+                parameters.use_hass_icon === 1 &&
+                "attributes" in data && "icon" in data.attributes && data.attributes.icon !== "False")
+            {
+                icon = data.attributes.icon.replace(":", "-");
+                child.icons.icon_on = icon;
+                child.icons.icon_off = icon
+            }
+            if ("title_is_friendly_name" in child.parameters
+            && child.parameters.title_is_friendly_name === 1
+            && "friendly_name" in data.attributes)
+            {
+                child.ViewModel.title(data.attributes.friendly_name)
+            }
+            if ("title2_is_friendly_name" in child.parameters
+            && child.parameters.title2_is_friendly_name === 1
+            && "friendly_name" in data.attributes)
+            {
+                child.ViewModel.title2(data.attributes.friendly_name)
+            }
+            if (typeof child.entity_state === 'undefined')
+            {
+                child.entity_state = {}
+            }
+            child.entity_state[child.entity] = data;
+            var entity = data.entity_id;
+            var elen = child.monitored_entities.length;
+            for (j = 0; j < elen; j++)
+            {
+                if (child.monitored_entities[j].entity === entity)
+                {
+                    monitored_entities[j].initial(child, data)
+                }
+            }
         }
-        state_url = base_url + "/api/appdaemon/state/" + ns + "/" + entity.entity;
-        $.ajax
-        ({
-            url: state_url,
-            type: 'GET',
-            success: function(data)
-                    {
-                        if (data.state == null)
-                        {
-                            if ("title" in child.ViewModel)
-                            {
-                                child.ViewModel.title("entity not found: " + entity.entity);
-                                new_state = null
-                            }
-                            else
-                            {
-                                console.log("Entity not found: " + entity.entity)
-                            }
-                        }
-                        else
-                        {
-                            new_state = data.state;
-                            if ("use_hass_icon" in child.parameters &&
-                                parameters.use_hass_icon === 1 &&
-                                "attributes" in new_state && "icon" in new_state.attributes && new_state.attributes.icon !== "False")
-                            {
-                                icon = new_state.attributes.icon.replace(":", "-");
-                                child.icons.icon_on = icon;
-                                child.icons.icon_off = icon
-                            }
-                            if ("title_is_friendly_name" in child.parameters
-                            && child.parameters.title_is_friendly_name === 1
-                            && "friendly_name" in new_state.attributes)
-                            {
-                                child.ViewModel.title(new_state.attributes.friendly_name)
-                            }
-                            if ("title2_is_friendly_name" in child.parameters
-                            && child.parameters.title2_is_friendly_name === 1
-                            && "friendly_name" in new_state.attributes)
-                            {
-                                child.ViewModel.title2(new_state.attributes.friendly_name)
-                            }
-                            if (typeof child.entity_state === 'undefined')
-                            {
-                                child.entity_state = {}
-                            }
-                            child.entity_state[entity.entity] = new_state;
-                            entity.initial(child, new_state)
-                        }
-                    },
-            error: function(data)
-                    {
-                        alert("Error getting state, check Java Console for details")
-                    }
-
-        });
     };
 
     this.on_ha_data = function(data)
@@ -342,24 +310,18 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
 
     this.call_service = function(child, args)
     {
-        if ("resident_namespace" in parameters)
+        if ("resident_namespace" in child)
         {
-            ns = parameters.resident_namespace
+            ns = child.parameters.resident_namespace
         }
         else
         {
-            ns = parameters.namespace;
+            ns = child.parameters.namespace;
         }
-        args["namespace"] = parameters.namespace;
 
-        service_url = child.url + "/api/appdaemon/service/" + ns + "/" + args["service"];
-        $.ajax({
-              type: "POST",
-              url: service_url,
-              data: JSON.stringify(args),
-              dataType: "json"
-            });
-        //$.post(service_url, args, "json");
+        service = args["service"];
+
+        window.dashstream.stream.call_service(service, ns, args)
     };
 
     // Initialization
@@ -455,13 +417,5 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
                   }
               }(callbacks[i].callback, child)), null, callbacks[i].action);
         }
-    }
-
-    // Grab current status for entities
-
-    elen = monitored_entities.length;
-    for (i=0;i < elen;i++)
-    {
-        this.get_state(child, url, monitored_entities[i])
     }
 };
