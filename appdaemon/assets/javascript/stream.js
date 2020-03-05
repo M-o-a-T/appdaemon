@@ -1,4 +1,4 @@
-var ADStream = function(transport, protocol, domain, port, client_name, on_connect, on_message, on_disconnect)
+var Stream = function(transport, protocol, domain, port, client_name, on_connect, on_message, on_disconnect)
 {
 
     var self = this;
@@ -192,10 +192,11 @@ var ADStream = function(transport, protocol, domain, port, client_name, on_conne
 
     this.call_service = function(service, namespace, args, callback)
     {
+        args["__name"] = "stream"
         request = {
             request_type: "call_service",
             data: {
-                namespace: ns,
+                namespace: namespace,
                 service: service,
                 data: args
             }

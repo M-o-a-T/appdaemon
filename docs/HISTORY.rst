@@ -1,7 +1,7 @@
 Change Log
 ==========
 
-4.0.2
+4.0.4
 -----
 
 **Features**
@@ -24,6 +24,10 @@ Change Log
 - Admin UI now breaks out App instance and lifetime callback stats separately
 - Convert admin and dashboard to get_state from stream
 - Increase default work factor for password hashes to 12
+- Added `add_entity` api call, alongeside `state/add_entity` service call
+- Added the ability to remove plugin entities like `HA` when using the `remove_entity` api
+- Cleanup sequences when modified. This ensures removed sequences are also removed from the Admin UI and AD
+- Added support to use environment variables using the `!env_var` tag, if not wanting to use the `!secrets` tag
 
 **Fixes**
 
@@ -32,6 +36,23 @@ Change Log
 - Fixed up socketio support to work with the new stream semantics
 - Fixed a bug that allowed multiple copies of an App to run if there was an error in the signature of terminate()
 - AppDaemon's REST API no longer needs to be active to use the dashboard or Admin interfaces
+
+**Breaking Changes**
+
+- Changed ``websocket_connected`` and ``websocket_disconnected`` to ``stream_connected`` and ``stream_disconnected`` respectively
+
+None
+
+4.0.3 (2020-02-29)
+------------------
+
+**Features**
+
+- Pinned astral to v1.10.1
+
+**Fixes**
+
+- Pinned astral to prevent a bug in the latest v2 astral
 
 **Breaking Changes**
 
@@ -53,8 +74,9 @@ None
 None
 
 
-4.0.1 (2020-01-20)
-------------------
+
+4.0.1
+-----
 
 **Features**
 

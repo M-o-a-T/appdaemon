@@ -134,7 +134,7 @@ var DashStream = function(transport, protocol, domain, port, title, widgets)
         })
     };
 
-    this.stream = new ADStream(transport, protocol, domain, port, title, this.on_connect, this.on_message, this.on_disconnect);
+    this.stream = new Stream(transport, protocol, domain, port, title, this.on_connect, this.on_message, this.on_disconnect);
 
 };
 
@@ -310,7 +310,7 @@ var WidgetBase = function(widget_id, url, skin, parameters, monitored_entities, 
 
     this.call_service = function(child, args)
     {
-        if ("resident_namespace" in child)
+        if ("resident_namespace" in child.parameters)
         {
             ns = child.parameters.resident_namespace
         }
