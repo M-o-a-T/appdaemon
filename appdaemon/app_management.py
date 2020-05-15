@@ -586,7 +586,9 @@ class AppManagement:
                 # if silent is False:
                 self.logger.info("Found %s total apps", total_apps)
 
-                await self.set_state(self.total_apps_sensor, state=total_apps)
+                await self.set_state(
+                    self.total_apps_sensor, state=total_apps, attributes={"friendly_name": "Total Apps"}
+                )
 
                 active_apps = self.get_active_app_count()
 
@@ -946,7 +948,7 @@ class AppManagement:
                 deplist.append(app)
             self.get_dependent_apps(app, deplist)
 
-        # Need to gove the topological sort a full list of apps or it will fail
+        # Need to give the topological sort a full list of apps or it will fail
         full_list = list(self.app_config.keys())
 
         deps = []

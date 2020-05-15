@@ -143,7 +143,11 @@ class ADAPI:
         else:
             logger = self.logger
 
-        msg = self._sub_stack(msg)
+        try:
+            msg = self._sub_stack(msg)
+        except IndexError as i:
+            kwargs["level"] = "ERROR"
+            self._log(self.err, i, *args, **kwargs)
 
         self._log(logger, msg, *args, **kwargs)
 
@@ -544,6 +548,11 @@ class ADAPI:
 
         """
         namespace = self._get_namespace(**kwargs)
+
+        if await self.AD.state.entity_exists(namespace, entity_id):
+            self.logger.warning("%s already exists, will not be adding it", entity_id)
+            return None
+
         await self.AD.state.add_entity(namespace, entity_id, state, attributes)
         return None
 
@@ -1094,7 +1103,7 @@ class ADAPI:
             token (str, optional): A previously registered token can be passed with the api call, which
             can be used to secure the app route. This allows for different security credentials to be used across different
             app routes. It should be noted that if a device has already registered using AD's Admin UI's password
-            and a cookie has been stored by the broswer, that device will bypass the token and still access the web server.
+            and a cookie has been stored by the browser, that device will bypass the token and still access the web server.
 
         Returns:
             A handle that can be used to remove the registration.
@@ -1383,11 +1392,11 @@ class ADAPI:
         return await self.AD.state.get_state(self.name, namespace, entity_id, attribute, default, copy, **kwargs)
 
     @utils.sync_wrapper
-    async def set_state(self, entity_id, **kwargs):
+    async def set_state(self, entity, **kwargs):
         """Updates the state of the specified entity.
 
         Args:
-            entity_id (str): The fully qualified entity id (including the device type).
+            entity (str): The fully qualified entity id (including the device type).
             **kwargs (optional): Zero or more keyword arguments.
 
         Keyword Args:
@@ -1422,13 +1431,13 @@ class ADAPI:
             >>> self.set_state("light.office_1", state="off", namespace ="hass")
 
         """
-        self.logger.debug("set state: %s, %s", entity_id, kwargs)
+        self.logger.debug("set state: %s, %s", entity, kwargs)
         namespace = self._get_namespace(**kwargs)
-        await self._check_entity(namespace, entity_id)
+        await self._check_entity(namespace, entity)
         if "namespace" in kwargs:
             del kwargs["namespace"]
 
-        return await self.AD.state.set_state(self.name, namespace, entity_id, **kwargs)
+        return await self.AD.state.set_state(self.name, namespace, entity, **kwargs)
 
     #
     # Service
@@ -1449,7 +1458,7 @@ class ADAPI:
         Args:
             service: Name of the service, in the format `domain/service`. If the domain does not exist it will be created
             cb: A reference to the function to be called when the service is requested. This function may be a regular
-                function, or it may be asynch. Note that if it is an async function, it will run on AppDaemon's main loop
+                function, or it may be async. Note that if it is an async function, it will run on AppDaemon's main loop
                 meaning that any issues with the service could result in a delay of AppDaemon's core functions.
 
         Returns:
@@ -1507,7 +1516,7 @@ class ADAPI:
         """Calls a Service within AppDaemon.
 
         This function can call any service and provide any required parameters.
-        By default, there are stardard services that can be called within AD. Other
+        By default, there are standard services that can be called within AD. Other
         services that can be called, are dependent on the plugin used, or those registered
         by individual apps using the `register_service` api.
         In a future release, all available services can be found using AD's Admin UI.
@@ -1595,7 +1604,7 @@ class ADAPI:
 
             Run an inline sequence.
 
-            >>> handle = self.run_sequence([{"light.turn_on": {"entity_id": "light.office_1"}}, {"sleep": 5}, {"light.turn_off":
+            >>> handle = self.run_sequence([{"light/turn_on": {"entity_id": "light.office_1"}}, {"sleep": 5}, {"light.turn_off":
             {"entity_id": "light.office_1"}}])
 
         """
@@ -1778,22 +1787,14 @@ class ADAPI:
             utc_string (str): A string that contains a date and time to convert.
 
         Returns:
-            An UTC object that is equivalent to the date and time contained in `utc_string`.
+            An POSIX timestamp that is equivalent to the date and time contained in `utc_string`.
 
         """
         return datetime.datetime(*map(int, re.split(r"[^\d]", utc_string)[:-1])).timestamp() + self.get_tz_offset() * 60
 
-    @staticmethod
-    def get_tz_offset():
-        """Returns the timezone difference between UTC and Local Time."""
-        utc_offset_min = (
-            int(round((datetime.datetime.now() - datetime.datetime.utcnow()).total_seconds())) / 60
-        )  # round for taking time twice
-        utc_offset_h = utc_offset_min / 60
-
-        # we do not handle 1/2 h timezone offsets
-        assert utc_offset_min == utc_offset_h * 60
-        return utc_offset_min
+    def get_tz_offset(self):
+        """Returns the timezone difference between UTC and Local Time in minutes."""
+        return self.AD.tz.utcoffset(self.datetime()).total_seconds() / 60
 
     @staticmethod
     def convert_utc(utc):

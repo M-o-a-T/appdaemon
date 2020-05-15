@@ -71,21 +71,22 @@ class State:
             # Add the callback
             #
 
-            if name not in self.AD.callbacks.callbacks:
-                self.AD.callbacks.callbacks[name] = {}
+            async with self.AD.callbacks.callbacks_lock:
+                if name not in self.AD.callbacks.callbacks:
+                    self.AD.callbacks.callbacks[name] = {}
 
-            handle = uuid.uuid4().hex
-            self.AD.callbacks.callbacks[name][handle] = {
-                "name": name,
-                "id": self.AD.app_management.objects[name]["id"],
-                "type": "state",
-                "function": cb,
-                "entity": entity,
-                "namespace": namespace,
-                "pin_app": pin_app,
-                "pin_thread": pin_thread,
-                "kwargs": kwargs,
-            }
+                handle = uuid.uuid4().hex
+                self.AD.callbacks.callbacks[name][handle] = {
+                    "name": name,
+                    "id": self.AD.app_management.objects[name]["id"],
+                    "type": "state",
+                    "function": cb,
+                    "entity": entity,
+                    "namespace": namespace,
+                    "pin_app": pin_app,
+                    "pin_thread": pin_thread,
+                    "kwargs": kwargs,
+                }
 
             #
             # If we have a timeout parameter, add a scheduler entry to delete the callback later
@@ -173,26 +174,28 @@ class State:
             return None
 
     async def cancel_state_callback(self, handle, name):
-        if name not in self.AD.callbacks.callbacks or handle not in self.AD.callbacks.callbacks[name]:
-            self.logger.warning("Invalid callback in cancel_state_callback() from app {}".format(name))
+        async with self.AD.callbacks.callbacks_lock:
+            if name not in self.AD.callbacks.callbacks or handle not in self.AD.callbacks.callbacks[name]:
+                self.logger.warning("Invalid callback in cancel_state_callback() from app {}".format(name))
 
-        if name in self.AD.callbacks.callbacks and handle in self.AD.callbacks.callbacks[name]:
-            del self.AD.callbacks.callbacks[name][handle]
-            await self.AD.state.remove_entity("admin", "state_callback.{}".format(handle))
-        if name in self.AD.callbacks.callbacks and self.AD.callbacks.callbacks[name] == {}:
-            del self.AD.callbacks.callbacks[name]
+            if name in self.AD.callbacks.callbacks and handle in self.AD.callbacks.callbacks[name]:
+                del self.AD.callbacks.callbacks[name][handle]
+                await self.AD.state.remove_entity("admin", "state_callback.{}".format(handle))
+            if name in self.AD.callbacks.callbacks and self.AD.callbacks.callbacks[name] == {}:
+                del self.AD.callbacks.callbacks[name]
 
     async def info_state_callback(self, handle, name):
-        if name in self.AD.callbacks.callbacks and handle in self.AD.callbacks.callbacks[name]:
-            callback = self.AD.callbacks.callbacks[name][handle]
-            return (
-                callback["namespace"],
-                callback["entity"],
-                callback["kwargs"].get("attribute", None),
-                self.sanitize_state_kwargs(self.AD.app_management.objects[name]["object"], callback["kwargs"]),
-            )
-        else:
-            raise ValueError("Invalid handle: {}".format(handle))
+        async with self.AD.callbacks.callbacks_lock:
+            if name in self.AD.callbacks.callbacks and handle in self.AD.callbacks.callbacks[name]:
+                callback = self.AD.callbacks.callbacks[name][handle]
+                return (
+                    callback["namespace"],
+                    callback["entity"],
+                    callback["kwargs"].get("attribute", None),
+                    self.sanitize_state_kwargs(self.AD.app_management.objects[name]["object"], callback["kwargs"]),
+                )
+            else:
+                raise ValueError("Invalid handle: {}".format(handle))
 
     async def process_state_callbacks(self, namespace, state):
         data = state["data"]
@@ -203,46 +206,63 @@ class State:
         # Process state callbacks
 
         removes = []
-        for name in self.AD.callbacks.callbacks.keys():
-            for uuid_ in self.AD.callbacks.callbacks[name]:
-                callback = self.AD.callbacks.callbacks[name][uuid_]
-                if callback["type"] == "state" and (
-                    callback["namespace"] == namespace or callback["namespace"] == "global" or namespace == "global"
-                ):
-                    cdevice = None
-                    centity = None
-                    if callback["entity"] is not None:
-                        if "." not in callback["entity"]:
-                            cdevice = callback["entity"]
-                            centity = None
+        async with self.AD.callbacks.callbacks_lock:
+            for name in self.AD.callbacks.callbacks.keys():
+                for uuid_ in self.AD.callbacks.callbacks[name]:
+                    callback = self.AD.callbacks.callbacks[name][uuid_]
+                    if callback["type"] == "state" and (
+                        callback["namespace"] == namespace or callback["namespace"] == "global" or namespace == "global"
+                    ):
+                        cdevice = None
+                        centity = None
+                        if callback["entity"] is not None:
+                            if "." not in callback["entity"]:
+                                cdevice = callback["entity"]
+                                centity = None
+                            else:
+                                cdevice, centity = callback["entity"].split(".")
+                        if callback["kwargs"].get("attribute") is None:
+                            cattribute = "state"
                         else:
-                            cdevice, centity = callback["entity"].split(".")
-                    if callback["kwargs"].get("attribute") is None:
-                        cattribute = "state"
-                    else:
-                        cattribute = callback["kwargs"].get("attribute")
+                            cattribute = callback["kwargs"].get("attribute")
 
-                    cold = callback["kwargs"].get("old")
-                    cnew = callback["kwargs"].get("new")
+                        cold = callback["kwargs"].get("old")
+                        cnew = callback["kwargs"].get("new")
 
-                    executed = False
-                    if cdevice is None:
-                        executed = await self.AD.threading.check_and_dispatch_state(
-                            name,
-                            callback["function"],
-                            entity_id,
-                            cattribute,
-                            data["new_state"],
-                            data["old_state"],
-                            cold,
-                            cnew,
-                            callback["kwargs"],
-                            uuid_,
-                            callback["pin_app"],
-                            callback["pin_thread"],
-                        )
-                    elif centity is None:
-                        if device == cdevice:
+                        executed = False
+                        if cdevice is None:
+                            executed = await self.AD.threading.check_and_dispatch_state(
+                                name,
+                                callback["function"],
+                                entity_id,
+                                cattribute,
+                                data["new_state"],
+                                data["old_state"],
+                                cold,
+                                cnew,
+                                callback["kwargs"],
+                                uuid_,
+                                callback["pin_app"],
+                                callback["pin_thread"],
+                            )
+                        elif centity is None:
+                            if device == cdevice:
+                                executed = await self.AD.threading.check_and_dispatch_state(
+                                    name,
+                                    callback["function"],
+                                    entity_id,
+                                    cattribute,
+                                    data["new_state"],
+                                    data["old_state"],
+                                    cold,
+                                    cnew,
+                                    callback["kwargs"],
+                                    uuid_,
+                                    callback["pin_app"],
+                                    callback["pin_thread"],
+                                )
+
+                        elif device == cdevice and entity == centity:
                             executed = await self.AD.threading.check_and_dispatch_state(
                                 name,
                                 callback["function"],
@@ -258,27 +278,11 @@ class State:
                                 callback["pin_thread"],
                             )
 
-                    elif device == cdevice and entity == centity:
-                        executed = await self.AD.threading.check_and_dispatch_state(
-                            name,
-                            callback["function"],
-                            entity_id,
-                            cattribute,
-                            data["new_state"],
-                            data["old_state"],
-                            cold,
-                            cnew,
-                            callback["kwargs"],
-                            uuid_,
-                            callback["pin_app"],
-                            callback["pin_thread"],
-                        )
-
-                    # Remove the callback if appropriate
-                    if executed is True:
-                        remove = callback["kwargs"].get("oneshot", False)
-                        if remove is True:
-                            removes.append({"name": callback["name"], "uuid": uuid_})
+                        # Remove the callback if appropriate
+                        if executed is True:
+                            remove = callback["kwargs"].get("oneshot", False)
+                            if remove is True:
+                                removes.append({"name": callback["name"], "uuid": uuid_})
 
         for remove in removes:
             await self.cancel_state_callback(remove["uuid"], remove["name"])
@@ -335,11 +339,10 @@ class State:
         if entity in self.state[namespace]:
             self.state[namespace].pop(entity)
             data = {"event_type": "__AD_ENTITY_REMOVED", "data": {"entity_id": entity}}
-            await self.AD.events.process_event(namespace, data)
+            self.AD.loop.create_task(self.AD.events.process_event(namespace, data))
 
     async def add_entity(self, namespace, entity, state, attributes=None):
         if await self.entity_exists(namespace, entity):
-            self.logger.warning("%s already exists, will not be adding it", entity)
             return
 
         attrs = {}
@@ -360,7 +363,7 @@ class State:
             "data": {"entity_id": entity, "state": state},
         }
 
-        await self.AD.events.process_event(namespace, data)
+        self.AD.loop.create_task(self.AD.events.process_event(namespace, data))
 
     async def get_state(self, name, namespace, entity_id=None, attribute=None, default=None, copy=True):
         self.logger.debug("get_state: %s.%s %s %s", entity_id, attribute, default, copy)
@@ -394,11 +397,11 @@ class State:
             if entity_id.split(".", 1)[0] == domain
         }
 
-    def parse_state(self, entity_id, namespace, **kwargs):
-        self.logger.debug("parse_state: %s, %s", entity_id, kwargs)
+    def parse_state(self, entity, namespace, **kwargs):
+        self.logger.debug("parse_state: %s, %s", entity, kwargs)
 
-        if entity_id in self.state[namespace]:
-            new_state = self.state[namespace][entity_id]
+        if entity in self.state[namespace]:
+            new_state = self.state[namespace][entity]
         else:
             # Its a new state entry
             new_state = {"attributes": {}}
@@ -414,6 +417,9 @@ class State:
                 new_state["attributes"].update(kwargs["attributes"])
         else:
             new_state["attributes"].update(kwargs)
+
+        # API created entities won't necessarily have entity_id set
+        new_state["entity_id"] = entity
 
         return new_state
 
@@ -455,19 +461,19 @@ class State:
         else:
             self.logger.warning("Unknown service in state service call: %s", kwargs)
 
-    async def set_state(self, name, namespace, entity_id, **kwargs):
-        self.logger.debug("set_state(): %s, %s", entity_id, kwargs)
-        if entity_id in self.state[namespace]:
-            old_state = deepcopy(self.state[namespace][entity_id])
+    async def set_state(self, name, namespace, entity, **kwargs):
+        self.logger.debug("set_state(): %s, %s", entity, kwargs)
+        if entity in self.state[namespace]:
+            old_state = deepcopy(self.state[namespace][entity])
         else:
             old_state = {"state": None, "attributes": {}}
-        new_state = self.parse_state(entity_id, namespace, **kwargs)
+        new_state = self.parse_state(entity, namespace, **kwargs)
         new_state["last_changed"] = utils.dt_to_str((await self.AD.sched.get_now()).replace(microsecond=0), self.AD.tz)
         self.logger.debug("Old state: %s", old_state)
         self.logger.debug("New state: %s", new_state)
-        if not await self.AD.state.entity_exists(namespace, entity_id):
+        if not await self.AD.state.entity_exists(namespace, entity):
             if not ("_silent" in kwargs and kwargs["_silent"] is True):
-                self.logger.info("%s: Entity %s created in namespace: %s", name, entity_id, namespace)
+                self.logger.info("%s: Entity %s created in namespace: %s", name, entity, namespace)
 
         # Fire the plugin's state update if it has one
 
@@ -476,22 +482,26 @@ class State:
         if hasattr(plugin, "set_plugin_state"):
             # We assume that the state change will come back to us via the plugin
             self.logger.debug("sending event to plugin")
-            result = await plugin.set_plugin_state(namespace, entity_id, **kwargs)
+            result = await plugin.set_plugin_state(namespace, entity, **kwargs)
             if result is not None:
                 if "entity_id" in result:
                     result.pop("entity_id")
-                self.state[namespace][entity_id] = self.parse_state(entity_id, namespace, **result)
+                self.state[namespace][entity] = self.parse_state(entity, namespace, **result)
         else:
             # Set the state locally
-            self.state[namespace][entity_id] = new_state
+            self.state[namespace][entity] = new_state
             # Fire the event locally
             self.logger.debug("sending event locally")
             data = {
                 "event_type": "state_changed",
-                "data": {"entity_id": entity_id, "new_state": new_state, "old_state": old_state},
+                "data": {"entity_id": entity, "new_state": new_state, "old_state": old_state},
             }
 
-            await self.AD.events.process_event(namespace, data)
+            #
+            # Schedule this rather than awaiting to avoid locking ourselves out
+            #
+            # await self.AD.events.process_event(namespace, data)
+            self.AD.loop.create_task(self.AD.events.process_event(namespace, data))
 
         return new_state
 
@@ -499,7 +509,12 @@ class State:
         self.state[namespace] = state
 
     def update_namespace_state(self, namespace, state):
-        self.state[namespace].update(state)
+        if isinstance(namespace, list):  # if its a list, meaning multiple namespaces to be updated
+            for ns in namespace:
+                if state.get(ns) is not None:
+                    self.state[ns].update(state[ns])
+        else:
+            self.state[namespace].update(state)
 
     async def save_namespace(self, namespace):
         if namespace in self.AD.namespaces:

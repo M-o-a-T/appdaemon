@@ -78,7 +78,7 @@ class ADMain:
             self.logger.info("Keyboard interrupt")
             self.stop()
         if signum == signal.SIGTERM:
-            self.logger.info("SIGTERM Recieved")
+            self.logger.info("SIGTERM Received")
             self.stop()
 
     def stop(self):
@@ -173,10 +173,14 @@ class ADMain:
             "-t", "--timewarp", help="speed that the scheduler will work at for time travel", default=1, type=float,
         )
         parser.add_argument(
-            "-s", "--starttime", help="start time for scheduler <YYYY-MM-DD HH:MM:SS>", type=str,
+            "-s", "--starttime", help="start time for scheduler <YYYY-MM-DD HH:MM:SS|YYYY-MM-DD#HH:MM:SS>", type=str,
         )
         parser.add_argument(
-            "-e", "--endtime", help="end time for scheduler <YYYY-MM-DD HH:MM:SS>", type=str, default=None,
+            "-e",
+            "--endtime",
+            help="end time for scheduler <YYYY-MM-DD HH:MM:SS|YYYY-MM-DD#HH:MM:SS>",
+            type=str,
+            default=None,
         )
         parser.add_argument(
             "-D",
@@ -215,6 +219,12 @@ class ADMain:
         try:
 
             #
+            # Read config file using environment variables
+            #
+
+            yaml.add_constructor("!env_var", utils._env_var_yaml, Loader=yaml.SafeLoader)
+
+            #
             # Initially load file to see if secret directive is present
             #
             yaml.add_constructor("!secret", utils._dummy_secret, Loader=yaml.SafeLoader)
@@ -249,12 +259,6 @@ class ADMain:
             #
 
             yaml.add_constructor("!secret", utils._secret_yaml, Loader=yaml.SafeLoader)
-
-            #
-            # Also read config file using environment variables
-            #
-
-            yaml.add_constructor("!env_var", utils._env_var_yaml, Loader=yaml.SafeLoader)
 
             with open(config_file_yaml, "r") as yamlfd:
                 config_file_contents = yamlfd.read()
@@ -396,7 +400,7 @@ class ADMain:
                 with pid.PidFile(name, dir):
                     self.run(appdaemon, hadashboard, admin, api, http)
             except pid.PidFileError:
-                self.logger.error("Unable to aquire pidfile - terminating")
+                self.logger.error("Unable to acquire pidfile - terminating")
         else:
             self.run(appdaemon, hadashboard, admin, api, http)
 
