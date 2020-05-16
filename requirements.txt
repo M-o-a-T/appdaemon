@@ -1,7 +1,7 @@
 aiohttp==3.6.2
 aiohttp_jinja2>=1.2.0
 astral==1.10.1
-azure==4.0.0
+#azure==4.0.0
 bcrypt>=3.1.7
 deepdiff>=4.3.1
 feedparser==5.2.1
