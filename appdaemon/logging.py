@@ -188,7 +188,7 @@ class Logging:
         default_filename = "STDOUT"
         default_logsize = 1000000
         default_log_generations = 3
-        default_format = "{asctime} {levelname} {appname}: {message}"
+        default_format = "{appname}: {message}"
         default_date_format = "%Y-%m-%d %H:%M:%S.%f"
         default_filter_threshold = 1
         default_filter_timeout = 0.1
@@ -236,7 +236,7 @@ class Logging:
                     self.config[log]["filename"] = default_filename
                     self.config[log]["log_generations"] = default_log_generations
                     self.config[log]["log_size"] = default_logsize
-                    self.config[log]["format"] = "{asctime} {levelname} {appname}: {message}"
+                    self.config[log]["format"] = "{appname}: {message}"
                     self.config[log]["date_format"] = default_date_format
                     self.config[log]["filter_threshold"] = default_filter_threshold
                     self.config[log]["filter_timeout"] = default_filter_timeout
@@ -250,7 +250,7 @@ class Logging:
                     self.config[log]["filename"] = default_filename
                     self.config[log]["log_generations"] = default_log_generations
                     self.config[log]["log_size"] = default_logsize
-                    self.config[log]["format"] = "{asctime} {levelname} {appname}: {message}"
+                    self.config[log]["format"] = "{appname}: {message}"
                     self.config[log]["date_format"] = default_date_format
                     self.config[log]["filter_threshold"] = default_filter_threshold
                     self.config[log]["filter_timeout"] = default_filter_timeout
