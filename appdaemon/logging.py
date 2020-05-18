@@ -151,7 +151,6 @@ class LogSubscriptionHandler(StreamHandler):
                             "message": record.message,
                             "type": "log",
                             "log_type": self.type,
-                            "asctime": record.asctime,
                             "ts": record.ts,
                             "formatted_message": msg,
                         },

@@ -11,7 +11,7 @@ from datetime import timedelta
 import logging
 import iso8601
 
-from appdaemon import utils as utils
+import appdaemon.utils as utils
 from appdaemon.appdaemon import AppDaemon
 
 
